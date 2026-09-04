@@ -49,6 +49,8 @@ Boundary rule: `rooms` is process-local and volatile; `db` is durable. Nothing i
 - Stateless. Signed JWT in an `httpOnly`, `secure`, `sameSite` cookie. **No server-side session table.**
 - Guest and registered identity use the **same cookie and claim mechanism**, distinguished by a `type` claim. This is what makes guest upgrade a claim rewrite rather than a session migration.
 - Every read of identity verifies signature and expiry. Never decode-only.
+- **Lifetimes: 24 hours for a guest, 30 days for a registered user. [USER-DECIDED — 2026-09-04]** There is no refresh-token flow, so expiry logs the user out mid-conversation — a day covers any realistic guest visit, and 30 days matches what a chat product normally does.
+- The guest lifetime is **load-bearing beyond sessions**: the maintenance task reaps guest `users` rows whose `last_seen_at` is older than it, so it also decides when a guest nickname returns to the pool.
 - No refresh-token flow. Re-auth on expiry is accepted.
 - Full rule and template: `docs/PATTERNS/jwt-session-cookies.md`.
 

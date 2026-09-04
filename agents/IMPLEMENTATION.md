@@ -20,6 +20,12 @@ None. No workstream has produced code.
 
 ## Change log
 
+### Skeleton blockers resolved: complete, 2026-09-04
+
+- **Migrations: `node-pg-migrate`.** Plain SQL on the same `pg` driver, no query builder, so the no-ORM pattern holds. Recorded as a **production** dependency, not a dev one — the droplet runs migrations at deploy, so an `npm ci --omit=dev` install must still contain it.
+- **JWT lifetimes: 24 hours guest, 30 days registered.** Never specified by any source; surfaced only because guest reaping depends on it. The guest value also decides when a nickname returns to the pool.
+- Both closed in `docs/ASSUMPTIONS.md`. `docs/TODO.md` "Blocking the first line of code" now holds only the first-admin bootstrap plus two mechanical P1 items.
+
 ### Data model reviewed and approved: complete, 2026-09-04
 
 - **P0 gate closed.** The AI-invented DRAFT schema in `docs/ARCHITECTURE.md` was reviewed table by table and replaced with an approved six-table schema carrying full DDL, indexes and constraints. Explicit user approval given.

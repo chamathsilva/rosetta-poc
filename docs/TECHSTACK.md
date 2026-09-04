@@ -19,6 +19,7 @@ All entries: **PLANNED** (no code or infrastructure exists yet).
 |---|---|---|
 | Database | Self-hosted PostgreSQL on DigitalOcean droplet | PLANNED |
 | Connection pooling | (TBD at install) | PLANNED |
+| Migrations | `node-pg-migrate` **[USER-DECIDED — 2026-09-04]** — plain SQL on the same `pg` driver, no query builder, no ORM | PLANNED |
 | Session storage | Signed JWT cookies; no server-side session table | PLANNED |
 | Password hashing | bcrypt, cost factor 12 **[USER-DECIDED]** | PLANNED |
 | Cookie parsing | `cookie-parser` (Express) **[USER-DECIDED]** | PLANNED |

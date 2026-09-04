@@ -17,6 +17,7 @@ All entries: **PLANNED** (no versions pinned; versions to be pinned at install).
 | `pg` | PostgreSQL client | to be pinned at install | PLANNED |
 | `jsonwebtoken` | JWT signing/verification for session cookies | to be pinned at install | PLANNED |
 | `bcrypt` | Password hashing, cost factor 12 **[USER-DECIDED]** | to be pinned at install | PLANNED |
+| `node-pg-migrate` | Database migrations **[USER-DECIDED — 2026-09-04]**. Listed as a **production** dependency deliberately: the droplet runs migrations at deploy, so a `npm ci --omit=dev` install must still contain it | to be pinned at install | PLANNED |
 | `cookie-parser` | Cookie parsing middleware for Express — closes the gap where `docs/PATTERNS/jwt-session-cookies.md` assumed `req.cookies` with no middleware listed **[USER-DECIDED]** | to be pinned at install | PLANNED |
 
 ## Development dependencies

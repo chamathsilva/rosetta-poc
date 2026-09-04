@@ -9,12 +9,9 @@ Disagreement with a decided architecture is logged here as an open question. It 
 
 ## Undecided technology
 
-### Database migration tool: none chosen [OPEN]
+### Database migration tool: `node-pg-migrate` [RESOLVED — 2026-09-04, → `docs/TECHSTACK.md`]
 
-Confidence: n/a — undecided.
-`docs/CODEMAP.md` proposes `src/db/` for migrations with nothing to run them. Raw `pg` is decided; the migration runner is not.
-**Now blocks the walking skeleton** (2026-09-04): the skeleton persists messages from day one, so there is no phase left in which this can stay open.
-Target on resolution: `docs/TECHSTACK.md`, `docs/DEPENDENCIES.md`, `docs/PATTERNS/`.
+Chosen for plain SQL migrations on the same `pg` driver, with no query builder to erode the no-ORM pattern. Recorded as a production dependency because the droplet runs migrations at deploy time.
 
 ### Rate-limiting library: none chosen [OPEN]
 
@@ -37,11 +34,9 @@ Was never recorded as an open question, yet `docs/CONTEXT.md` mandated `typescri
 Confidence: n/a — `docs/DEPENDENCIES.md` records "likely jest or mocha" and "likely eslint" as guesses, not decisions.
 Target on resolution: `docs/DEPENDENCIES.md`.
 
-### JWT lifetime: never specified [OPEN]
+### JWT lifetime: 24h guest, 30d registered [RESOLVED — 2026-09-04, → `docs/ARCHITECTURE.md`]
 
-Confidence: n/a — undecided. `docs/ARCHITECTURE.md` says "no refresh-token flow, re-auth on expiry is accepted" but never gives the expiry.
-**Now load-bearing** (2026-09-04): the approved data model reaps guest `users` rows whose `last_seen_at` is older than the JWT lifetime, so this number decides when nicknames are released and how long guest identity survives. It cannot stay open past the walking skeleton.
-Target on resolution: `docs/ARCHITECTURE.md` session model, `.env.example`.
+Was never specified by any source and only surfaced because guest reaping depends on it. The guest value also sets when a nickname returns to the pool.
 
 ### Connection pooling configuration: unspecified [OPEN]
 

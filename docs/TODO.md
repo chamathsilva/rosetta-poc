@@ -12,10 +12,6 @@ An item leaves this file when it is done (→ `agents/IMPLEMENTATION.md`) or whe
 
 Nothing in the application can create the first admin: `bans.created_by` and `moderation_actions.actor_id` both require an existing admin row. Needs a seed migration or a documented manual `UPDATE users SET is_admin = true`. Surfaced by the 2026-09-04 data model review; previously unowned.
 
-### P0 — before walking skeleton — choose a migration tool — `docs/DEPENDENCIES.md`
-
-`docs/CODEMAP.md` proposes `src/db/` for migrations with nothing to run them. **Promoted from P1 to P0 on 2026-09-04**: the walking skeleton now persists messages from day one (`docs/CONTEXT.md` target state 1), so this blocks the first line of application code, not merely the gated deploy. Open in `docs/ASSUMPTIONS.md`.
-
 ### P0 — before walking skeleton — establish the cost-recording habit — `docs/EVALUATION-LOG.md`
 
 Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Required by `docs/CONTEXT.md` evaluation guardrails. **Resolved (Phase 8): home is `docs/EVALUATION-LOG.md`, append-only, one row per feature.** Habit still needs to be exercised starting with the first feature.
@@ -46,7 +42,7 @@ Resolved (Phase 8): free subdomain sufficient for the gated phase. Still needs d
 
 ### P0 — before public launch — one scheduled maintenance task — `src/db/`
 
-Three statements, one task, one thing to monitor: null `messages.ip` older than 30 days; null `bans.ip` more than 30 days past `expires_at`; delete guest `users` rows whose `last_seen_at` is older than the JWT lifetime. Do not split into three cron entries — the retention promise must be enforced in one place that can be pointed at.
+Three statements, one task, one thing to monitor: null `messages.ip` older than 30 days; null `bans.ip` more than 30 days past `expires_at`; delete guest `users` rows whose `last_seen_at` is older than 24 hours, the guest JWT lifetime. Do not split into three cron entries — the retention promise must be enforced in one place that can be pointed at.
 
 ### P1 — before public launch — no hard-delete path for message bodies — `src/server/moderation`
 

@@ -1,0 +1,20 @@
+# Rosetta
+agents/TEMP/
+refsrc/
+!refsrc/INDEX.md
+
+# Node
+node_modules/
+npm-debug.log*
+*.log
+
+# Secrets — DB password, JWT signing key. Never commit.
+.env
+.env.*
+!.env.example
+
+# Build / runtime
+dist/
+coverage/
+*.pid
+.DS_Store

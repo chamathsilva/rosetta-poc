@@ -1,0 +1,51 @@
+{
+  "description": "A publicly-launched, guest-and-registered web chat application (chatib.us-style), built as the vehicle for an evaluation of the Rosetta instruction layer for AI coding agents.",
+  "servicesDescription": {
+    "chat": "Single Node.js service: HTTP API, static client, WebSocket chat rooms with in-process presence state, and session auth. Self-hosted Postgres on the same host."
+  },
+  "codingAgents": [
+    "claude-code"
+  ],
+  "sdlc": {
+    "issue_tracker": "GitHub Issues",
+    "issue_tracker_project": "https://github.com/chamathsilva/rosetta-poc/issues",
+    "wiki": "[WIKI - e.g. Confluence, Notion, GitHub Wiki]",
+    "wiki_project": "[WIKI_URL]",
+    "scm": "GitHub",
+    "scm_project": "https://github.com/chamathsilva/rosetta-poc",
+    "build_management": "GitHub Actions",
+    "build_management_project": "https://github.com/chamathsilva/rosetta-poc/actions",
+    "infrastructure": "Single DigitalOcean droplet ($6/mo, 1 GB RAM, 2 GB swap) running Node.js, PostgreSQL and Caddy under systemd",
+    "infrastructure_project": "[INFRASTRUCTURE_PROJECT - droplet not yet provisioned]",
+    "hosting": "DigitalOcean",
+    "hosting_project": "[HOSTING_PROJECT - account/project not yet created]",
+    "monitoring": "[MONITORING - not yet chosen; required before public launch]",
+    "monitoring_project": "[MONITORING_PROJECT]",
+    "logging": "[LOGGING - tool not yet chosen; retention decided: IP + timestamp logs kept 30 days (USER-DECIDED, Phase 8)]",
+    "logging_project": "[LOGGING_PROJECT]",
+    "security": "[SECURITY_TOOL - secrets currently planned as systemd EnvironmentFile; no manager chosen]",
+    "security_project": "[SECURITY_PROJECT]",
+    "collaboration_project": "[COLLABORATION_PROJECT - solo POC]",
+    "unit_tests": "in-repository",
+    "integration_tests": "in-repository",
+    "e2e_tests": "in-repository",
+    "code_graph": "Built-in docs/CODEMAP.md plus typescript-lsp for local symbol navigation. No third-party code-graph tool; no source access granted to any external service."
+  },
+  "vocabulary": {
+    "guest": "Unauthenticated user who joins with only a nickname, no password and no persistent account. Session is ephemeral.",
+    "registered user": "User with a durable account and credentials. May be created fresh or upgraded from an active guest session.",
+    "guest upgrade": "Converting an in-flight guest session into a registered account while preserving nickname and room membership.",
+    "room": "A named multi-user chat channel. Membership and socket fan-out are held in process memory, not in the database.",
+    "presence": "The live roster of users currently connected to a room, derived from open WebSocket connections.",
+    "DM": "Direct 1:1 private message between two users, outside any room. Deliberately held back as the un-pre-designed baseline feature for the Rosetta-vs-plain-Claude comparison.",
+    "moderation": "Report, remove and ban capability plus the audit log behind it. Gates public launch.",
+    "gated launch": "Deployed and reachable but closed to strangers behind Caddy basic auth (reverse-proxy layer, no application code), used for every phase before moderation ships.",
+    "public launch": "Open guest access for anonymous strangers on the internet. Permitted only once rate limiting and the minimum moderation set are live.",
+    "walking skeleton": "Thinnest end-to-end slice - nickname, join, send, receive - deployed to the real droplet to prove the whole path works.",
+    "baseline feature": "A feature built deliberately without Rosetta, to measure Rosetta's effect. Without it this POC is a demo, not an evaluation.",
+    "Rosetta": "The subject under evaluation: a versioned markdown instruction layer (bootstrap, workflow classifier, skills, subagents, HITL gates) loaded into the coding agent at session start."
+  },
+  "versions": {
+    "rosetta": "3.1.13"
+  }
+}

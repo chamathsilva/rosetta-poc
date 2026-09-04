@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "rosetta": {
+      "source": {
+        "source": "github",
+        "repo": "griddynamics/rosetta"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "rosetta@rosetta": true
+  }
+}

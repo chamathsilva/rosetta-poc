@@ -62,24 +62,128 @@ Boundary rule: `rooms` is process-local and volatile; `db` is durable. Nothing i
 - Broadcast guards `readyState` on every send.
 - Full rule and template: `docs/PATTERNS/websocket-room-fanout.md`.
 
-## Data model sketch — DRAFT, UNAPPROVED
+## Data model — APPROVED
 
-**[AI-INFERRED — no schema has been written or reviewed by a human]**
+**[USER-DECIDED — reviewed and approved 2026-09-04. Supersedes the AI-invented DRAFT sketch.]**
 
-**DRAFT. This table is AI-invented, not human-approved.** It requires explicit human review before any migration is written in `src/db/`. Do not treat its presence here as authorization to implement it. Do not delete it, do not promote it out of draft status without that review.
+Reviewed table by table against the requirements in `docs/CONTEXT.md`. Four defects in the draft were found and fixed; each fix carries its reason below so it is not silently reverted.
 
-| Table | Purpose | Notes |
+Access is via parameterized `pg` queries only. No ORM. See `docs/PATTERNS/parameterized-pg-queries.md`.
+
+**No direct-message tables exist here, deliberately.** 1:1 DM is the reserved no-Rosetta baseline feature and must not be pre-designed. See `docs/CONTEXT.md` evaluation guardrails.
+
+```sql
+CREATE TABLE users (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nickname      text NOT NULL,
+  password_hash text,                                  -- NULL for guests
+  is_guest      boolean NOT NULL DEFAULT true,
+  is_admin      boolean NOT NULL DEFAULT false,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  last_seen_at  timestamptz NOT NULL DEFAULT now(),
+  banned_at     timestamptz,                           -- account ban; IP ban lives in bans
+  CONSTRAINT registered_users_have_a_password CHECK (is_guest OR password_hash IS NOT NULL)
+);
+CREATE UNIQUE INDEX users_nickname_key   ON users (lower(nickname));
+CREATE        INDEX users_guest_reap_idx ON users (last_seen_at) WHERE is_guest;
+
+CREATE TABLE rooms (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX rooms_name_key ON rooms (lower(name));
+
+CREATE TABLE messages (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id         uuid NOT NULL REFERENCES rooms(id),
+  author_id       uuid REFERENCES users(id) ON DELETE SET NULL,
+  author_nickname text NOT NULL,                       -- snapshot; survives guest reaping
+  body            text NOT NULL,
+  ip              inet,                                -- nulled at 30 days, row kept
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  deleted_at      timestamptz                          -- soft delete, auditable
+);
+CREATE INDEX messages_room_history_idx ON messages (room_id, created_at DESC);
+CREATE INDEX messages_ip_purge_idx     ON messages (created_at) WHERE ip IS NOT NULL;
+
+CREATE TABLE bans (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ip         inet,                                     -- nulled 30 days after expires_at
+  reason     text NOT NULL,
+  created_by uuid NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  CONSTRAINT ban_expires_after_creation CHECK (expires_at > created_at)
+);
+CREATE INDEX bans_active_idx ON bans (ip, expires_at);
+
+CREATE TABLE reports (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id  uuid NOT NULL REFERENCES messages(id),
+  reporter_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  reason      text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+CREATE INDEX reports_open_idx ON reports (created_at) WHERE resolved_at IS NULL;
+
+CREATE TABLE moderation_actions (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id          uuid NOT NULL REFERENCES users(id),
+  action            text NOT NULL
+                    CHECK (action IN ('remove_message','ban_ip','ban_account','unban')),
+  target_message_id uuid REFERENCES messages(id),
+  target_user_id    uuid REFERENCES users(id) ON DELETE SET NULL,
+  target_ban_id     uuid REFERENCES bans(id),
+  target_nickname   text,                              -- snapshot, same reason as messages
+  note              text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT exactly_one_target CHECK (
+    (target_message_id IS NOT NULL)::int
+  + (target_user_id    IS NOT NULL)::int
+  + (target_ban_id     IS NOT NULL)::int = 1)
+);
+```
+
+### Decisions and their reasons
+
+**Guests get a `users` row**, flagged `is_guest`. This reverses the draft's "guests have no `users` row". Reasons: authorship gets a real foreign key instead of a polymorphic column; nickname uniqueness becomes one database constraint covering guests and accounts alike; guest upgrade becomes a flag flip on an existing row, which preserves nickname and room membership as `docs/CONTEXT.md` requires. Cost: one write per guest join. This does **not** contradict the stateless session model — an identity row is not a session table, and the JWT remains the only session mechanism.
+
+**Bans are by IP, in their own table, and time-limited.** A `users.banned_at` alone cannot satisfy the moderation floor, because a banned guest simply rejoins. `banned_at` is retained for account bans; `bans` covers the rejoin. Known weakness, accepted: an IP ban is a speed bump against a mobile network or a VPN, and can catch a shared address — which is why bans expire.
+
+**A guest cannot take a registered nickname.** Enforced by `users_nickname_key`, which is case-insensitive: `Alice` and `alice` collide. Without case folding the impersonation vector stays open.
+
+**`author_nickname` is a snapshot.** Guest rows are reaped when the session expires, which sets `author_id` to null. Without the snapshot every message older than one session would show no author, and moderation would read anonymous history.
+
+**`users.is_admin` was absent from the draft entirely.** Nothing could perform a removal or a ban without it.
+
+**Message ids are `uuid`.** Ids are exposed to clients by the report button; a sequential id would leak message volume and allow enumeration.
+
+**`rooms` exists from the first migration** although the walking skeleton uses one room, so `messages.room_id` is a correct foreign key from the start and needs no backfill.
+
+**`moderation_actions` uses three nullable target columns** with an `exactly_one_target` check, rather than one polymorphic column, so every target keeps referential integrity.
+
+### Retention rule
+
+**An IP address is retained only while it is operationally needed, then erased. The record it belongs to survives.**
+
+| Record | IP kept while | Then |
 |---|---|---|
-| `users` | Registered accounts | nickname (unique), password hash, created_at, banned_at |
-| `rooms` | Room catalog | name, created_at. Membership is NOT here — it is in-process |
-| `messages` | Message history | room_id, author (user_id or guest nickname), body, created_at, ip, deleted_at |
-| `reports` | Moderation intake | message_id, reporter, reason, created_at, resolved_at |
-| `moderation_actions` | Admin audit log | actor, action (remove/ban), target, created_at |
+| `messages` | 30 days | `ip` set to NULL, message kept |
+| `bans` | the ban is active, plus 30 days | `ip` set to NULL, ban row kept for audit |
 
-- Guests have no `users` row. Guest identity exists only in the JWT claim.
-- `messages.ip` + `created_at` satisfy the IP/timestamp logging requirement in `docs/CONTEXT.md`. **Retention: 30 days.** **[USER-DECIDED]**
-- Soft-delete (`deleted_at`) rather than hard delete, so moderation is auditable.
-- Access is via parameterized `pg` queries only. No ORM. See `docs/PATTERNS/parameterized-pg-queries.md`.
+Nulling is a hard erase of the value, not a soft delete. `deleted_at` on `messages` is the soft one — a removed message keeps its body so moderation stays auditable.
+
+**This promise is bounded by backup retention**, which is capped at 30 days for exactly this reason — see "Backups" below. The two must be changed together or not at all.
+
+Known limitation, accepted for now: because removal is a soft delete, there is no path that genuinely erases a message body. A legal takedown or an erasure request would need one. Logged in `docs/TODO.md`.
+
+### Repeat-offender escalation — documented, not built
+
+Erasing ban IPs means the system cannot see that an address has been banned before, so escalation on repeat offences is impossible.
+
+The path, if it is ever wanted: store `hmac(ip, server_secret)` alongside the address. Exact-match ban lookups work on the hash, so correlation survives the address being erased. **Do not build it speculatively** — same reasoning as the Redis pub/sub adapter below.
 
 ## Deployment topology
 
@@ -92,7 +196,7 @@ internet → Caddy (:443, auto TLS, basic auth gate) → Node process (:3000, HT
 
 - Droplet: **$6/mo, 1 GB RAM, 1 vCPU, 25 GB SSD, 1 TB transfer**, plus **2 GB swap**. Not $4/512 MB — 512 MB is not viable once Postgres is co-hosted.
 - Upgrade path if memory pressure appears: **$12/mo, 2 GB RAM**. Decided in advance so it is not re-argued under load.
-- systemd units for Node and Postgres; Caddy under its own service.
+- systemd units for Node and Postgres; Caddy under its own service. The Node unit runs **compiled JavaScript from `dist/`**, never TypeScript sources — the build is a deploy-time step, not a runtime one. **[USER-DECIDED — 2026-09-04]**
 - **Pre-moderation gate: Caddy basic auth**, enforced in the reverse proxy, above the application — no application code implements it. Removing it at public launch is a Caddy config change, not a code change. **[USER-DECIDED]**
 - Secrets via systemd `EnvironmentFile`, read as `process.env`, fail-fast on missing required vars. See `docs/PATTERNS/env-config-secrets.md`.
 - Not provisioned yet. Do not provision before the walking skeleton is ready to deploy.
@@ -113,6 +217,8 @@ Self-hosting Postgres means backups are ours. This is not optional and not a lat
 
 - Scheduled `pg_dump`.
 - A **tested restore**. An untested backup is not a backup. The restore drill is the deliverable, not the dump script.
+- **Retention capped at 30 days. [USER-DECIDED — 2026-09-04]** This is a privacy control, not a storage decision. A dump taken while an IP was still live keeps that IP in plaintext forever, so the 30-day retention rule in the data model above is only true if no dump outlives it. The cap and the retention rule must be changed together or not at all.
+- Rejected alternative: keep older dumps and scrub IPs out of them. More code, runs offline, fails silently.
 - Currently unproven — logged in `docs/ASSUMPTIONS.md`.
 
 ## Capacity ceiling: single instance

@@ -49,7 +49,7 @@ Provenance is marked per section: **[USER-DECIDED]** = stated by the user or `PO
 
 - Report button available to users on user-generated content.
 - Admin capability to remove content and ban a user.
-- IP address + timestamp logging, retained for **30 days**. **[USER-DECIDED]**
+- IP address + timestamp logging, retained for **30 days**. **[USER-DECIDED]** The retention promise covers backups too — database dumps are capped at 30 days so none outlives the data it holds. **[USER-DECIDED — 2026-09-04]**
 - A published abuse contact address.
 - Heavier trust-and-safety tooling may follow later. These four may not.
 
@@ -69,6 +69,8 @@ Provenance is marked per section: **[USER-DECIDED]** = stated by the user or `PO
 **[AI-INFERRED from `POC-BRIEF.md` "Plan" — sequencing is the brief's; the phrasing is not]**
 
 1. Walking skeleton: guest nickname + join + send + receive in one room, deployed to real infrastructure behind the gate.
+   **Messages are persisted from day one** — the skeleton proves the full path including PostgreSQL, not a memory-only slice. **[USER-DECIDED — 2026-09-04]**
+   The data model is reviewed and approved (`docs/ARCHITECTURE.md`). The migration-tool choice and the first-admin bootstrap still block this step. See `docs/TODO.md`.
 2. Multi-room + presence roster.
 3. Accounts: registration, login, guest→registered upgrade.
 4. 1:1 DM — **built as the no-Rosetta baseline**.

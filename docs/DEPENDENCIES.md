@@ -23,7 +23,10 @@ All entries: **PLANNED** (no versions pinned; versions to be pinned at install).
 
 | Package | Purpose | Version | Status |
 |---|---|---|---|
-| test framework | (TBD — likely jest or mocha) | to be pinned at install | PLANNED |
+| `typescript` | Source language and compiler **[USER-DECIDED — 2026-09-04]** | **`^5.9.3` — pin 5.x, not `latest`** (see `docs/TECHSTACK.md` constraints) | PLANNED |
+| `@types/node` | Node type definitions | to be pinned at install | PLANNED |
+| `@types/express`, `@types/ws`, `@types/pg`, `@types/jsonwebtoken`, `@types/bcrypt`, `@types/cookie-parser` | Type definitions for the production dependencies above | to be pinned at install | PLANNED |
+| test framework | (TBD — likely jest or mocha; must run against TypeScript) | to be pinned at install | PLANNED |
 | linter | (TBD — likely eslint) | to be pinned at install | PLANNED |
 
 ## Infrastructure

@@ -16,6 +16,10 @@ rosetta-poc/
   agents/            Rosetta workflow state and plans
   .github/workflows/ GitHub Actions CI configuration
   package.json       Node.js dependencies
+  tsconfig.json      TypeScript compiler configuration
+  dist/              Compiled JavaScript — build output, not committed; what systemd runs
 ```
+
+Sources are TypeScript (`.ts`) as of 2026-09-04; see `docs/TECHSTACK.md`.
 
 This layout is UNCONFIRMED. It remains a proposal until real code exists — the init workflow could not confirm it, because the repo is still greenfield. Re-derive this file from actual structure once the walking skeleton lands, and treat any difference between this sketch and the real tree as the sketch being wrong.

@@ -43,6 +43,12 @@ Keep template entries so that AI knows how to fill them in later on.
 - The `.gitignore` secret-leak gap was found by a human-directed orchestrator pass over a phase that reported itself clean.
 - Reason it worked: the reviewer checked the artifact, not the report.
 
+### Offering paired options in one HITL batch exposed a contradiction the user could not have seen [ACTIVE]
+
+- The data model review asked four questions in one batch. Two answers were mutually impossible: ban-by-IP without accounts, plus a single `author_id` requiring accounts.
+- The contradiction was visible only because both options carried their dependency in the option text. Restating it and asking one follow-up resolved it in a single round.
+- Generalizes: when batched questions have hidden dependencies, name the dependency inside the option, then verify the answers against each other before acting. Do not silently pick the reading that suits the implementation.
+
 ### \<Generalized What Worked\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]
@@ -54,6 +60,12 @@ Keep template entries so that AI knows how to fill them in later on.
 - Hypothesis: the phase validated that files were produced, not that their content was correct.
 - Root cause: no adversarial check on security-relevant output; the completion criterion was existence, not correctness.
 - Problem: this failure mode is silent and generalizes — any phase whose checklist asks "did you produce X" will pass on a wrong X.
+
+### Nine phases missed a contradiction between a tooling mandate and the stack docs [ACTIVE]
+
+- Hypothesis: every phase read the documents it owned and none read two documents against each other.
+- Root cause: `docs/CONTEXT.md` mandated `typescript-lsp` for navigation while `docs/TECHSTACK.md` and `docs/DEPENDENCIES.md` described a plain-JavaScript stack with no compiler, no `tsconfig` and no `@types`. The source language was never an entry in `docs/ASSUMPTIONS.md`, so no phase owned the question.
+- Problem: cross-document consistency has no owner. Phase 9 verification found staleness *within* documents, not disagreement *between* them. An unasked question cannot be flagged as unresolved, so it fails silently — the same shape as the `.gitignore` failure above.
 
 ### \<Generalized What Failed\> [ACTIVE|RETIRED]
 
@@ -78,6 +90,20 @@ Keep template entries so that AI knows how to fill them in later on.
 - The chat app produces visible artifacts; the evaluation produces none unless deliberately recorded.
 - Per-feature token/wall-clock cost and the without-Rosetta baseline feature (1:1 DM) cannot be reconstructed after the fact. Losing them turns the POC into a demo.
 - Usage: check `docs/CONTEXT.md` "Evaluation guardrails" before starting any feature work.
+
+### `typescript@latest` is now the Go port and breaks the language server [ACTIVE]
+
+- `npm install -g typescript` resolves to 7.x (verified 7.0.2, 2026-09-04), the native Go rewrite. Its package contains `lib/tsc.js` and nothing else — no `tsserver.js`, no `typescript.js`, no `tsserverlibrary.js`.
+- `typescript-language-server` 5.3.0 exits at initialize with "Could not find a valid TypeScript installation", which reads like a PATH or config fault and is not one.
+- Fix: pin `typescript@5`. Recorded as a hard constraint in `docs/TECHSTACK.md` and a version pin in `docs/DEPENDENCIES.md`.
+- Generalizes: an unpinned major of a toolchain package can silently swap the artifact set, not just the behavior. The error message names the wrong cause.
+
+### A data-retention promise is only as strong as backup retention [ACTIVE]
+
+- `docs/ARCHITECTURE.md` mandated 30-day IP retention in one section and scheduled `pg_dump` in another. Neither referenced the other. A dump taken while an IP was live keeps it in plaintext forever, so the retention promise was false as written.
+- Found only because the user asked whether "erased" meant soft delete. No phase, review or gate surfaced it.
+- Fix: backup retention capped at 30 days, with each section naming the other so they cannot be changed independently.
+- Generalizes: any retention, deletion or erasure claim must be checked against every copy of the data — backups, WAL, replicas, logs — not only the live table.
 
 ### \<Generalized Discovery\> [ACTIVE|RETIRED]
 

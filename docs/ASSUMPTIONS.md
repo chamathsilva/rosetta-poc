@@ -13,6 +13,7 @@ Disagreement with a decided architecture is logged here as an open question. It 
 
 Confidence: n/a — undecided.
 `docs/CODEMAP.md` proposes `src/db/` for migrations with nothing to run them. Raw `pg` is decided; the migration runner is not.
+**Now blocks the walking skeleton** (2026-09-04): the skeleton persists messages from day one, so there is no phase left in which this can stay open.
 Target on resolution: `docs/TECHSTACK.md`, `docs/DEPENDENCIES.md`, `docs/PATTERNS/`.
 
 ### Rate-limiting library: none chosen [OPEN]
@@ -27,10 +28,20 @@ Confidence: n/a — undecided. `gain.json` carries placeholders for both.
 Retention period (30 days) is now decided (`docs/CONTEXT.md`, `docs/ARCHITECTURE.md`); the logging tool choice still determines *where* that retention is technically enforced.
 Target on resolution: `gain.json`, `docs/TECHSTACK.md`.
 
+### Source language: TypeScript [RESOLVED — 2026-09-04, → `docs/TECHSTACK.md`]
+
+Was never recorded as an open question, yet `docs/CONTEXT.md` mandated `typescript-lsp` while `docs/TECHSTACK.md` and `docs/DEPENDENCIES.md` described a plain-JavaScript stack. Resolved by the user: **TypeScript**, compiled by `tsc` to `dist/`. No phase of `init-workspace-flow` caught the contradiction.
+
 ### Test framework and linter: not chosen [OPEN]
 
 Confidence: n/a — `docs/DEPENDENCIES.md` records "likely jest or mocha" and "likely eslint" as guesses, not decisions.
 Target on resolution: `docs/DEPENDENCIES.md`.
+
+### JWT lifetime: never specified [OPEN]
+
+Confidence: n/a — undecided. `docs/ARCHITECTURE.md` says "no refresh-token flow, re-auth on expiry is accepted" but never gives the expiry.
+**Now load-bearing** (2026-09-04): the approved data model reaps guest `users` rows whose `last_seen_at` is older than the JWT lifetime, so this number decides when nicknames are released and how long guest identity survives. It cannot stay open past the walking skeleton.
+Target on resolution: `docs/ARCHITECTURE.md` session model, `.env.example`.
 
 ### Connection pooling configuration: unspecified [OPEN]
 
@@ -43,6 +54,7 @@ Target on resolution: `docs/ARCHITECTURE.md`.
 
 Confidence: low. Self-hosting Postgres made backups an owned deliverable (`docs/ARCHITECTURE.md`). Neither `pg_dump` scheduling nor a restore has been performed.
 **An untested restore is not a backup.** This must not be marked done on the strength of a dump script alone.
+Retention is now capped at 30 days as a privacy control (`docs/ARCHITECTURE.md`); the cap is decided but unimplemented, so the retention promise is currently unenforced.
 Target on resolution: `docs/ARCHITECTURE.md`, `agents/IMPLEMENTATION.md`.
 
 ### Droplet not provisioned; real cost unverified [OPEN]

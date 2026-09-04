@@ -20,6 +20,26 @@ None. No workstream has produced code.
 
 ## Change log
 
+### Data model reviewed and approved: complete, 2026-09-04
+
+- **P0 gate closed.** The AI-invented DRAFT schema in `docs/ARCHITECTURE.md` was reviewed table by table and replaced with an approved six-table schema carrying full DDL, indexes and constraints. Explicit user approval given.
+- Four defects found in the draft: guests could not be banned; a guest could take a registered nickname; `messages.author` held two different kinds of value; "30-day retention" was ambiguous between deleting messages and erasing IPs.
+- Reversals from the draft: guests now get a `users` row flagged `is_guest`; bans are by IP in their own table, time-limited; message ids are `uuid`; `users.is_admin` added (absent from the draft entirely).
+- Retention rule adopted: an IP is kept only while operationally needed, then hard-erased; the record survives. Backup retention capped at 30 days so no dump outlives the data it holds.
+- Documented and deliberately unbuilt: repeat-offender escalation via `hmac(ip, secret)`.
+- New TODO items surfaced by the review: first-admin bootstrap, one scheduled maintenance task, no hard-delete path for message bodies, `pg_dump` retention cap. New open question: JWT lifetime, which now decides guest reaping.
+- No DM tables. The baseline-feature reservation holds.
+- No code and no migration written — `src/db/` is still empty. Built WITH Rosetta.
+
+### Toolchain and language decision: complete, 2026-09-04
+
+- Session-start `load-project-context` run; no code written.
+- **Source language decided: TypeScript** (`docs/TECHSTACK.md`, `docs/DEPENDENCIES.md`, `docs/CODEMAP.md`). Compiled by `tsc` to `dist/`; systemd runs the build output. Closes a contradiction no `init-workspace-flow` phase caught: `docs/CONTEXT.md` mandated `typescript-lsp` while the stack docs described plain JavaScript.
+- **Walking skeleton persists messages from day one** (`docs/CONTEXT.md` target state 1). Consequence: the DRAFT data model and the migration-tool choice moved into `docs/TODO.md` "Blocking the first line of code".
+- Installed globally under Node v22.14.0: `typescript` **5.9.3**, `typescript-language-server` 5.3.0. Per-Node-version — lost on `nvm use` of another version.
+- `typescript-lsp` plugin enabled and **validated**: `documentSymbol`, `hover`, `goToDefinition`, `findReferences` all return correct results. First attempt failed — `typescript@7.0.2` (native Go port) ships no `tsserver.js`; downgrading the global to the 5.x line fixed it.
+- Cost: ~20k main-thread tokens, 0 subagent tokens, ~10 min wall clock. Built WITH Rosetta.
+
 ### Workspace initialization: complete through Phase 7, 2026-09-04
 
 - `init-workspace-flow` run: `gain.json`, `docs/TECHSTACK.md`, `docs/CODEMAP.md`, `docs/DEPENDENCIES.md`, `docs/PATTERNS/` (5 prescribed patterns), `docs/CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/ASSUMPTIONS.md`, `agents/IMPLEMENTATION.md`, `agents/MEMORY.md`.

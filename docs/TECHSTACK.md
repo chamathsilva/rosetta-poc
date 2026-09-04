@@ -7,6 +7,9 @@ All entries: **PLANNED** (no code or infrastructure exists yet).
 | Component | Choice | Status |
 |---|---|---|
 | Node.js runtime | LTS current (to be pinned at install) | PLANNED |
+| Source language | **TypeScript** **[USER-DECIDED — 2026-09-04]** | PLANNED |
+| Build | `tsc` to `dist/`; systemd runs the compiled output, not the sources | PLANNED |
+| TypeScript version | **Pin the 5.x line (5.9.3 verified). Do NOT take `latest`.** | PLANNED |
 | HTTP framework | Express **[USER-DECIDED]** | PLANNED |
 | WebSocket library | `ws` | PLANNED |
 
@@ -39,6 +42,8 @@ All entries: **PLANNED** (no code or infrastructure exists yet).
 | Presence state | Derived from live WebSocket connections | PLANNED |
 
 ## Constraints
+
+- **`npm install typescript` without a version range now resolves to 7.x, the native Go port.** Its package ships `lib/tsc.js` only — no `tsserver.js`, no `typescript.js`. `typescript-language-server` fails at initialize against it, and any tool expecting the classic JS compiler API does too. Verified 2026-09-04. Pin `typescript@5`.
 
 - **One instance only:** in-process room state cannot scale to multiple droplets without Redis pub/sub adapter.
 - **Neon rejected:** 100 CU-hours/month free tier suspends compute mid-month for always-on apps.

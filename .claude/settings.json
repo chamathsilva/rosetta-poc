@@ -1,4 +1,8 @@
 {
+  "enabledPlugins": {
+    "rosetta@rosetta": true,
+    "typescript-lsp@claude-plugins-official": true
+  },
   "extraKnownMarketplaces": {
     "rosetta": {
       "source": {
@@ -6,8 +10,5 @@
         "repo": "griddynamics/rosetta"
       }
     }
-  },
-  "enabledPlugins": {
-    "rosetta@rosetta": true
   }
 }

@@ -13,12 +13,29 @@ Use when: writing any code in `src/db/` or any server code issuing a SQL stateme
 
 ## Template
 
-```js
-// Correct
-async function getMessagesForRoom(pool, roomId, limit) {
-  const { rows } = await pool.query(
-    'SELECT id, nickname, body, created_at FROM messages WHERE room_id = $1 ORDER BY created_at DESC LIMIT $2',
-    [roomId, limit]
+```ts
+import type { Pool } from 'pg';
+
+export interface MessageRow {
+  readonly id: string;
+  readonly author_nickname: string;
+  readonly body: string;
+  readonly created_at: Date;
+}
+
+// Correct: every value goes through a placeholder, never string interpolation.
+export async function getMessagesForRoom(
+  pool: Pool,
+  roomId: string,
+  limit: number,
+): Promise<readonly MessageRow[]> {
+  const { rows } = await pool.query<MessageRow>(
+    `SELECT id, author_nickname, body, created_at
+       FROM messages
+      WHERE room_id = $1 AND deleted_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [roomId, limit],
   );
   return rows;
 }
@@ -26,6 +43,11 @@ async function getMessagesForRoom(pool, roomId, limit) {
 // MUST NOT: string-built SQL, even for values that "look safe"
 // `SELECT * FROM messages WHERE room_id = '${roomId}'`  <-- forbidden
 ```
+
+Two details that are not stylistic:
+
+- The column is `author_nickname`, not `nickname` — see the approved data model in `docs/ARCHITECTURE.md`. It is the snapshot taken at write time, which is what survives a guest row being reaped.
+- `deleted_at IS NULL` belongs in every read of `messages` that a user will see. Removal is a soft delete, so omitting this filter shows moderated content back to users.
 
 ## Extension points
 

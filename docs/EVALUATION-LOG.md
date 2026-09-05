@@ -7,6 +7,7 @@ Append-only cost record for the Rosetta evaluation. **One row per unit of work, 
 ## How to record
 
 - **Main-thread tokens** — read the session's remaining-token counter at the start and end of the unit of work, and subtract. Not exact (it includes unrelated conversation), so mark it approximate.
+  **Known defect in this method (found 2026-09-04, session 2):** the counter resets to its full budget at the start of every user turn, so start-minus-end across a multi-turn session measures nothing. The only usable figure is the sum of within-turn deltas, which double-counts context re-read on each tool call and therefore overstates. Any main-thread number in this table is an upper bound, not a measurement. Subagent figures are unaffected — those are reported exactly.
 - **Subagent tokens** — each subagent completion reports `subagent_tokens` exactly. Sum them.
 - **Wall clock** — `date -u` at start and end. Include time spent waiting on human answers; that is a real cost of the HITL model and must not be quietly excluded.
 - **Mode** — `rosetta` or `baseline`. The baseline rows are the entire point of the comparison.
@@ -17,6 +18,8 @@ Append-only cost record for the Rosetta evaluation. **One row per unit of work, 
 | Date (UTC) | Item | Mode | Main tokens | Subagent tokens | Total | Wall clock | Notes |
 |---|---|---|---|---|---|---|---|
 | 2026-09-04 | `init-workspace-flow` — full 9-phase run | rosetta | ~82,000 | 345,434 | ~428,000 | 36 min | Greenfield repo. 2 files in, 24 files out, **zero lines of application code**. 12 HITL questions across 2 rounds. See breakdown below. |
+| 2026-09-04 | Session 2 — context load, language decision, LSP install, data model review | rosetta | ~140,000 (unreliable — see note) | 0 | ~140,000 | ~65 min | No workflow invoked; `load-project-context` + `hitl` prep steps only. **13 HITL questions across 4 rounds**, 12 doc files updated, zero subagents. Closed the P0 data model gate. Found two contradictions no init phase caught: JS vs TypeScript, and 30-day IP retention vs unbounded `pg_dump`. Still zero lines of application code. |
+| 2026-09-04 | `adhoc-flow` — scaffold TypeScript project, `.env.example`, React+Vite client | rosetta | ~70,000 (unreliable — see note) | 160,054 | ~230,000 | ~70 min | First workflow-driven run. Sized SMALL, orchestrator-executed, 2 review subagents. 5 config files, 5 pattern files rewritten, 8 docs synced. Scope grew twice mid-run, both user-approved: 2 pattern files → 5, and static client → React. Two review passes, 160,054 subagent tokens. Review 1 found 2 HIGH defects in a file the orchestrator had edited minutes earlier; review 2 found the server stub exited 0 silently and that no CSP was specified anywhere. 9 findings total, all real, none rejected. |
 
 ### Breakdown — init-workspace-flow, 2026-09-04
 

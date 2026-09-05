@@ -38,9 +38,18 @@ One process. One host. One database. No queue, no cache tier, no pub/sub, no CDN
 | `server/rooms` | In-process `Map<roomId, Set<socket>>` — membership, broadcast, presence roster |
 | `server/moderation` | Report intake, admin remove/ban, audit log |
 | `db` | `pg` pool, schema, migrations |
-| `client` | Static HTML/CSS/JS, WebSocket client |
+| `client` | **React 19 SPA, built by Vite to `dist/client`**, served as static assets by `server/http`. WebSocket client. **[USER-DECIDED — 2026-09-04, departs from the pre-Rosetta design]** |
 
 Boundary rule: `rooms` is process-local and volatile; `db` is durable. Nothing in `rooms` may be the only copy of anything that matters after a restart.
+
+### Client build
+
+**[USER-DECIDED — 2026-09-04]** The pre-Rosetta design specified plain static HTML/CSS/JS. That is superseded: the client is a **React 19 single-page app built by Vite**.
+
+- Vite and React are **build-time only**. They are `devDependencies` and nothing React-related runs on the droplet — the server serves the built output.
+- **Consequence for deployment:** the droplet installs with `npm ci --omit=dev`, so it *cannot* build the client. The client must be built in CI (GitHub Actions, per `gain.json`) and `dist/client` shipped as an artifact. This is the opposite of `node-pg-migrate`, which is a production dependency precisely because migrations must run on the droplet. Logged in `docs/TODO.md`.
+- Two TypeScript configs: `tsconfig.json` (server, `nodenext`, emits to `dist/server`, excludes `src/client`) and `tsconfig.client.json` (`DOM` lib, `react-jsx`, `noEmit` — Vite does the emitting). The client config **must** override `exclude`, or it inherits the base exclusion of its own source directory.
+- Cost accepted: React is ~190 KB raw, ~60 KB gzipped, served from the droplet with no CDN. Not measured against the capacity ceiling below.
 
 ## Session model
 

@@ -17,44 +17,69 @@ Use when: writing any code that establishes, reads, or upgrades a session — gu
 
 ## Template
 
-```js
-const jwt = require('jsonwebtoken');
+```ts
+import type { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { loadConfig } from './config.js';   // ESM: the .js extension is required
 
-function issueGuestSession(res, { nickname }) {
-  const token = jwt.sign(
-    { type: 'guest', nickname },
-    process.env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
-  res.cookie('session', token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-  });
+export type SessionClaims =
+  | { readonly type: 'guest'; readonly nickname: string }
+  | { readonly type: 'registered'; readonly userId: string; readonly nickname: string };
+
+// docs/ARCHITECTURE.md "Session model" [USER-DECIDED]. Fixed values, not env-tunable.
+const GUEST_TTL = '24h';
+const REGISTERED_TTL = '30d';
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    session?: SessionClaims;
+  }
 }
 
-function requireSession(req, res, next) {
-  const token = req.cookies?.session;
-  if (!token) return res.status(401).end();
+const COOKIE = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+} as const;
+
+export function issueGuestSession(res: Response, nickname: string): void {
+  const token = jwt.sign({ type: 'guest', nickname }, loadConfig().jwtSecret, {
+    expiresIn: GUEST_TTL,
+  });
+  res.cookie('session', token, COOKIE);
+}
+
+export function requireSession(req: Request, res: Response, next: NextFunction): void {
+  const token: unknown = req.cookies?.['session'];
+  if (typeof token !== 'string') {
+    res.status(401).end();
+    return;
+  }
   try {
-    req.session = jwt.verify(token, process.env.JWT_SECRET); // MUST verify, never decode-only
+    // MUST verify signature and expiry. Never jwt.decode().
+    req.session = jwt.verify(token, loadConfig().jwtSecret) as SessionClaims;
     next();
   } catch {
     res.status(401).end();
   }
 }
 
-function upgradeGuestToRegistered(existingClaims, { userId }) {
-  // Re-issue with the same nickname/room context, new type + identity claim.
+export function upgradeGuestToRegistered(existing: SessionClaims, userId: string): string {
   return jwt.sign(
-    { type: 'registered', userId, nickname: existingClaims.nickname },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { type: 'registered', userId, nickname: existing.nickname },
+    loadConfig().jwtSecret,
+    { expiresIn: REGISTERED_TTL },
   );
 }
 ```
 
+This template compiles clean under the repo's `tsconfig.json` — verified, not assumed. Three details that are load-bearing:
+
+- **The secret comes from `loadConfig()`, never a raw `process.env.JWT_SECRET` read.** Under `noUncheckedIndexedAccess` that read is `string | undefined`, which `jwt.sign` rejects. Routing it through the config module is both the fail-fast contract in `env-config-secrets.md` and the only form that typechecks.
+- **Lifetimes are constants here, not environment variables.** `docs/ARCHITECTURE.md` records them as decided facts. Keeping one copy is what prevents the registered lifetime drifting away from the decision — which it previously had, to 7 days.
+- **`GUEST_TTL` reaches past sessions.** The maintenance task reaps guest `users` rows on it, so changing it also changes when a nickname returns to the pool.
+
 ## Extension points
 
-- Token lifetime differs by type (guest short-lived, registered longer) — adjust `expiresIn`, not the verification path.
+- Token lifetime differs by type: **24h guest, 30d registered** (`docs/ARCHITECTURE.md`, [USER-DECIDED]). Adjust the constants, never the verification path.
 - No refresh-token flow is planned; re-authentication on expiry is the accepted behavior unless a future decision changes this.

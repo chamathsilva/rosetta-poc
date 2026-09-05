@@ -16,15 +16,19 @@ Nothing in the application can create the first admin: `bans.created_by` and `mo
 
 Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Required by `docs/CONTEXT.md` evaluation guardrails. **Resolved (Phase 8): home is `docs/EVALUATION-LOG.md`, append-only, one row per feature.** Habit still needs to be exercised starting with the first feature.
 
-### P1 — before first commit of code — scaffold the TypeScript project — repo root
-
-`package.json`, `tsconfig.json`, `.nvmrc` pinning the Node LTS, and a `build` script emitting to `dist/`. Language decided 2026-09-04 (`docs/TECHSTACK.md`). `typescript` must be pinned to **5.x**, not `latest` — see the constraint in `docs/TECHSTACK.md`. Local toolchain installed 2026-09-04: `typescript` 5.9.3 and `typescript-language-server` 5.3.0, global under Node v22.14.0 — per-Node-version, and they vanish on `nvm use` of another version.
-
-### P1 — before first commit of code — commit `.env.example` — repo root
-
-Documents required configuration (`JWT_SECRET`, `DATABASE_URL`, …). Referenced by `docs/PATTERNS/env-config-secrets.md`; does not exist.
-
 ## Blocking deployment (gated)
+
+### P0 — before gated deploy — build the client in CI, not on the droplet — `.github/workflows/`
+
+The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. CI must build and ship `dist/client` as a deploy artifact. Without this the deploy produces a server with no UI, and nothing fails loudly.
+
+### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
+
+`src/server/index.ts` and `src/client/main.tsx` are build-verification stubs with no product behaviour. `src/server/index.ts` throws if called. They exist to prove the build pipeline end to end and must be replaced, not extended.
+
+### P1 — before gated deploy — verify `bcrypt` loads on the droplet — `docs/DEPENDENCIES.md`
+
+`bcrypt` is a native module. npm 11 blocks install scripts by default, so it works locally only because the package ships a prebuilt binary for darwin-arm64. If no prebuild matches the droplet's architecture, `npm ci` succeeds and the server then fails at first import. Verify before relying on the deploy, or approve the install script explicitly.
 
 ### P1 — before gated deploy — implement the launch gate — `docs/ARCHITECTURE.md`
 
@@ -51,6 +55,10 @@ Known limitation, accepted at the 2026-09-04 data model review. Moderation remov
 ### P1 — before public launch — cap `pg_dump` retention at 30 days — `docs/ARCHITECTURE.md`
 
 Privacy control, not storage housekeeping. A dump that outlives the retention window keeps erased IPs in plaintext and makes the 30-day promise false.
+
+### P0 — with `server/http` — send a Content-Security-Policy header — `src/server/http`
+
+Raised by independent review 2026-09-04: React's escaping is currently the only XSS defence, and it is defeated by a single bad line. A CSP survives one. `script-src 'self'` without `'unsafe-inline'` is compatible with Vite's hashed output, so this does not need the policy loosened to work. Build it with `server/http`, not as a later hardening pass. Rule recorded in `docs/PATTERNS/untrusted-content-rendering.md`.
 
 ### P0 — before public launch — implement the moderation floor — `src/server/moderation`
 

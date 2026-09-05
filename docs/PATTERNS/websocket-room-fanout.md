@@ -12,21 +12,26 @@ The room `Set` is the only reference to which sockets belong to a room. If a soc
 
 ## Template
 
-```js
-// rooms: Map<roomId, Set<WebSocket>>
-const rooms = new Map();
+```ts
+import type { WebSocket } from 'ws';
 
-function joinRoom(roomId, socket) {
-  if (!rooms.has(roomId)) rooms.set(roomId, new Set());
-  rooms.get(roomId).add(socket);
-  socket.roomId = roomId; // needed for cleanup on close — do not omit
+const rooms = new Map<string, Set<WebSocket>>();
 
-  // MUST: registered before any other 'close'/'error' handling for this socket
+export function joinRoom(roomId: string, socket: WebSocket): void {
+  let members = rooms.get(roomId);
+  if (!members) {
+    members = new Set<WebSocket>();
+    rooms.set(roomId, members);
+  }
+  members.add(socket);
+
+  // MUST: registered before any other 'close'/'error' handling for this socket.
+  // roomId is captured by the closure - no property is set on the socket.
   socket.on('close', () => leaveRoom(roomId, socket));
   socket.on('error', () => leaveRoom(roomId, socket));
 }
 
-function leaveRoom(roomId, socket) {
+export function leaveRoom(roomId: string, socket: WebSocket): void {
   const members = rooms.get(roomId);
   if (!members) return;
   members.delete(socket);
@@ -34,16 +39,22 @@ function leaveRoom(roomId, socket) {
   broadcastPresence(roomId);
 }
 
-function broadcast(roomId, message, { exclude } = {}) {
+export function broadcast(
+  roomId: string,
+  message: string,
+  options: { readonly exclude?: WebSocket } = {},
+): void {
   const members = rooms.get(roomId);
   if (!members) return;
   for (const socket of members) {
-    if (socket === exclude) continue;
+    if (socket === options.exclude) continue;
     if (socket.readyState !== socket.OPEN) continue; // MUST: guard dead sockets, never assume open
     socket.send(message);
   }
 }
 ```
+
+Note on the closure: the earlier version of this template set `socket.roomId = roomId` so cleanup could find the room. That is unnecessary — the `close` and `error` handlers already capture `roomId` — and it does not typecheck, because `roomId` is not a property of `ws.WebSocket`. Do not reintroduce an ad-hoc property on the socket.
 
 ## Extension points
 

@@ -43,6 +43,16 @@ Was never specified by any source and only surfaced because guest reaping depend
 Confidence: n/a. `pg` is chosen; pool sizing against a 1 GB co-hosted droplet is not. Pool size interacts with the memory ceiling.
 Target on resolution: `docs/ARCHITECTURE.md`.
 
+### Client framework departs from the pre-Rosetta design [RESOLVED — 2026-09-04, → `docs/ARCHITECTURE.md`]
+
+`POC-BRIEF.md` and the original architecture specified a plain static HTML/CSS/JS client. The user decided React 19 with Vite instead.
+
+Recorded here because `docs/CONTEXT.md` requires departures from the pre-decided architecture to be written down rather than applied silently. This one is a deliberate user decision, not agent drift.
+
+Open consequences, not yet resolved:
+- The React payload (~60 KB gzipped, no CDN) has not been weighed against the single-instance capacity ceiling, which is itself unmeasured.
+- `docs/PATTERNS/untrusted-content-rendering.md` had to be rewritten: the XSS surface moved from `innerHTML` to `dangerouslySetInnerHTML`.
+
 ## Unproven operations
 
 ### Backup and restore procedure: unproven [OPEN]
@@ -63,10 +73,9 @@ Target on resolution: `agents/IMPLEMENTATION.md`.
 Confidence: n/a. `docs/ARCHITECTURE.md` documents the ceiling and its Redis pub/sub migration path, but the actual concurrent-connection limit of one 1 GB droplet running Node + Postgres has not been measured. Any capacity claim before measurement is a guess.
 Target on resolution: `docs/ARCHITECTURE.md`.
 
-### Node.js LTS version: unpinned [OPEN]
+### Node.js version: 24 [RESOLVED — 2026-09-04, → `.nvmrc`, `package.json`]
 
-Confidence: n/a. "LTS current, to be pinned at install."
-Target on resolution: `docs/TECHSTACK.md`, `package.json`, `.nvmrc`.
+Pinned to the Node 24 line in `.nvmrc` and `engines`. Note the global `typescript` and `typescript-language-server` are per-Node-version under nvm and were reinstalled for 24; the Claude Code process itself runs on v22.14.0, which also has them.
 
 ## Unverified inferences (agent-derived, no human source)
 

@@ -6,8 +6,8 @@ All entries: **PLANNED** (no code or infrastructure exists yet).
 
 | Component | Choice | Status |
 |---|---|---|
-| Node.js runtime | LTS current (to be pinned at install) | PLANNED |
-| Source language | **TypeScript** **[USER-DECIDED — 2026-09-04]** | PLANNED |
+| Node.js runtime | **Node 24** — pinned in `.nvmrc` and `package.json` engines `>=24 <25` **[USER-DECIDED — 2026-09-04]** | SCAFFOLDED |
+| Source language | **TypeScript 5.9.3, ESM** (`"type": "module"`, `module: nodenext`) **[USER-DECIDED — 2026-09-04]** | SCAFFOLDED |
 | Build | `tsc` to `dist/`; systemd runs the compiled output, not the sources | PLANNED |
 | TypeScript version | **Pin the 5.x line (5.9.3 verified). Do NOT take `latest`.** | PLANNED |
 | HTTP framework | Express **[USER-DECIDED]** | PLANNED |
@@ -38,7 +38,9 @@ All entries: **PLANNED** (no code or infrastructure exists yet).
 
 | Component | Choice | Status |
 |---|---|---|
-| Static client | Served from Node HTTP server | PLANNED |
+| Client framework | **React 19.2.8** **[USER-DECIDED — 2026-09-04]** | SCAFFOLDED |
+| Client build | **Vite 8.2.2** → `dist/client`, served statically by Express. Build-time only; must run in CI, not on the droplet | SCAFFOLDED |
+| Static client | Built output served from the Node HTTP server | SCAFFOLDED |
 | WebSocket rooms | In-process `Map<roomId, Set<socket>>` (single instance only) | PLANNED |
 | Presence state | Derived from live WebSocket connections | PLANNED |
 

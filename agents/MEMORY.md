@@ -32,6 +32,20 @@ Keep template entries so that AI knows how to fill them in later on.
 - The architecture was decided and researched before Rosetta was activated. Re-deriving it burns tokens and changes the variable under measurement.
 - Rule: transcribe. Disagreement goes to `docs/ASSUMPTIONS.md` as an open question, never into a silent change.
 
+### Prove a config is doing work by making it fail on purpose [ACTIVE]
+
+- A `tsconfig.client.json` that `extends` a base inherits the base's `exclude`. The base excluded `src/client`, so the client config excluded its own sources and checked nothing.
+- It surfaced only because zero files matched and `tsc` raised TS18003. Had one file matched, it would have passed silently while checking almost nothing.
+- Rule: after adding a strictness setting or a new config, introduce a deliberate error and confirm it is caught. A clean run proves nothing on its own — it is equally consistent with the check not running.
+- Applied twice this session: `noUncheckedIndexedAccess` proved active via a rejected `rows[0].length`, and the client config proved active by compiling a JSX template through it.
+
+### A stub that documents a failure must actually produce it [ACTIVE]
+
+- `src/server/index.ts` exported a `main()` that threw "not implemented" — and never called it. `node dist/server/index.js`, the exact command `npm start` runs, exited 0 with no output.
+- The comment said it would fail loudly. The code did the opposite, and the build, the typecheck and the file all looked correct.
+- Under systemd a clean immediate exit reads as a healthy unit, so this would have been much harder to diagnose than a crash.
+- Rule: when writing a placeholder whose purpose is to fail, run it and confirm a non-zero exit. Intent expressed in a comment is not behaviour.
+
 ### \<Generalized Preventive Rule\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]
@@ -48,6 +62,13 @@ Keep template entries so that AI knows how to fill them in later on.
 - The data model review asked four questions in one batch. Two answers were mutually impossible: ban-by-IP without accounts, plus a single `author_id` requiring accounts.
 - The contradiction was visible only because both options carried their dependency in the option text. Restating it and asking one follow-up resolved it in a single round.
 - Generalizes: when batched questions have hidden dependencies, name the dependency inside the option, then verify the answers against each other before acting. Do not silently pick the reading that suits the implementation.
+
+### A reviewer that compiles beats a reviewer that reads [ACTIVE]
+
+- The scaffold review was told it could run commands. It built a scratch project against the repo's real `tsconfig.json` and compiled the pattern templates, rather than reasoning about them.
+- That is how it found that `jwt-session-cookies.md` did not compile — a defect invisible to reading, in a file the orchestrator had edited minutes earlier and believed correct.
+- It also reported the exact error codes, which made the fix verifiable in both directions rather than plausible.
+- Generalizes: when reviewing anything executable, give the reviewer the means to execute it and demand error output as evidence. Reading finds contradictions; running finds defects.
 
 ### \<Generalized What Worked\> [ACTIVE|RETIRED]
 

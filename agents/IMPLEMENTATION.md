@@ -20,6 +20,19 @@ None. No workstream has produced code.
 
 ## Change log
 
+### Project scaffolded (adhoc-flow): complete, 2026-09-04
+
+First workflow-driven run of the session. `adhoc-flow`, sized SMALL, orchestrator-executed with two independent review passes.
+
+- **Scaffold**: `package.json` (ESM, Node 24 engines), `tsconfig.json`, `tsconfig.client.json`, `vite.config.ts`, `.nvmrc`, `.env.example`, `package-lock.json`. 161 packages, 0 vulnerabilities.
+- **Client is React 19.2.8 + Vite 8.2.2** **[USER-DECIDED]**, departing from the pre-Rosetta static HTML/CSS/JS design. Recorded in `docs/ASSUMPTIONS.md` as `docs/CONTEXT.md` requires. React and Vite are devDependencies — build-time only — so **CI must build the client**; the droplet's `npm ci --omit=dev` cannot. New P0 in `docs/TODO.md`.
+- **All five pattern files converted to TypeScript.** `parameterized-pg-queries.md` carried a factual defect — it selected `nickname` from `messages`, a column the approved schema does not have — and lacked the `deleted_at IS NULL` filter that soft delete makes mandatory. `untrusted-content-rendering.md` was rewritten for React, where the XSS surface is `dangerouslySetInnerHTML` and `javascript:` URLs rather than `innerHTML`.
+- **Independent review found two HIGH defects in a file the orchestrator had just edited**: a 7-day registered-token lifetime contradicting the 30-day decision, and a template that did not compile under `noUncheckedIndexedAccess`. Both confirmed by compiling in each direction, then fixed.
+- **Verification, not assertion**: `npm run typecheck` exit 0 across both configs; `npm run build` exit 0 producing `dist/server` and `dist/client`; a deliberate type error proved strictness is active; `bcrypt` hash and compare at cost 12 on Node 24.
+- **Second independent review** of the React/Vite work found the server stub exited 0 silently — `main()` was exported and never invoked, so the placeholder that existed to fail loudly did nothing. Fixed and verified: exit code 1. It also flagged the missing Content-Security-Policy as a material gap for an app rendering attacker-controlled content, now a P0 tied to `server/http`.
+- Two scaffold stubs exist in `src/` to prove the build pipeline. They carry no product behaviour and are listed for removal in `docs/TODO.md`.
+- Node pinned to 24 (`.nvmrc`, `engines`), closing an open assumption. Built WITH Rosetta.
+
 ### Skeleton blockers resolved: complete, 2026-09-04
 
 - **Migrations: `node-pg-migrate`.** Plain SQL on the same `pg` driver, no query builder, so the no-ORM pattern holds. Recorded as a **production** dependency, not a dev one — the droplet runs migrations at deploy, so an `npm ci --omit=dev` install must still contain it.

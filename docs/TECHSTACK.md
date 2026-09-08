@@ -36,7 +36,7 @@ Entries marked **PLANNED** are decided-and-unbuilt. Entries marked **IMPLEMENTED
 | CI | **GitHub Actions** — `.github/workflows/ci.yml`: lint, typecheck, tests against a `postgres:17` service container, build, and `dist/client` uploaded as an artifact **[USER-DECIDED — 2026-09-08]** | IMPLEMENTED |
 | Code review automation | **`anthropics/claude-code-action@v1`** — automatic review on every same-repo PR, plus an `@claude` mention workflow. Auth: `CLAUDE_CODE_OAUTH_TOKEN` repo secret **[USER-DECIDED — 2026-09-08]** | IMPLEMENTED |
 | Static analysis | **CodeQL** (`javascript-typescript`, `security-and-quality`) on PRs, pushes and weekly; **dependency-review** on PRs, failing at `high` **[USER-DECIDED — 2026-09-08]** | IMPLEMENTED |
-| Cloud static analysis (pre-existing) | **SonarCloud automatic analysis** — found already installed on the GitHub repository 2026-09-08, not added by any session and not recorded in `gain.json`. Reports a quality gate on every PR; **not** a required status check | ACTIVE, UNDECIDED |
+| Cloud static analysis (pre-existing) | **SonarCloud automatic analysis** — found already installed on the GitHub repository 2026-09-08, not added by any session and not recorded in `gain.json`. Reports a quality gate on every PR; **not** a required status check. Its gate is red by decision: the two "pin to a commit SHA" findings on `anthropics/claude-code-action@v1` were reviewed and **accepted, not fixed** **[USER-DECIDED — 2026-09-08]** — `v1` is the vendor's supported entry point and receives fixes, and pinning it buys stale behaviour. Do not re-open this. | ACTIVE, UNDECIDED |
 | CD (deploy to droplet) | GitHub Actions — not written; nothing consumes the `dist/client` artifact yet | PLANNED |
 
 ## Client

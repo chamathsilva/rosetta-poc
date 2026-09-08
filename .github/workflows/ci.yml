@@ -1,0 +1,124 @@
+# Quality gate. Runs on every pull request regardless of base branch, and on
+# pushes to the long-lived branches. Three jobs so a red check names the
+# failing concern: static checks, tests against a real PostgreSQL 17, build.
+#
+# The build job also closes the CI half of docs/TODO.md "build the client in
+# CI, not on the droplet": the droplet installs with `npm ci --omit=dev` and
+# React/Vite are devDependencies, so dist/client must be produced here and
+# carried to the droplet as an artifact.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - docs/data-model-approval
+      - main
+
+# A new push supersedes the run already in flight for the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Both projects: tsconfig.json (server) and tsconfig.client.json (client).
+      - name: Typecheck
+        run: npm run typecheck
+
+  test:
+    name: Tests (PostgreSQL 17)
+    runs-on: ubuntu-latest
+
+    # PostgreSQL 17 - the same major as compose.yml and the droplet, so CI
+    # and local development cannot drift silently (docs/TECHSTACK.md).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: rosetta
+          POSTGRES_PASSWORD: rosetta
+          POSTGRES_DB: rosetta_poc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rosetta -d rosetta_poc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # loadConfig() fails fast on all four (src/server/config.ts).
+      DATABASE_URL: postgres://rosetta:rosetta@localhost:5432/rosetta_poc
+      TEST_DATABASE_URL: postgres://rosetta:rosetta@localhost:5432/rosetta_poc_test
+      JWT_SECRET: ci-only-not-a-real-secret-ci-only-not-a-real-secret
+      PORT: '3000'
+      ALLOWED_ORIGIN: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # docker/postgres-init/ runs only under Docker Compose, not for a
+      # service container, so the _test database is created explicitly here.
+      # The container is disposable, so no reset is needed before migrating.
+      - name: Create the test database
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE rosetta_poc_test'
+
+      - name: Migrate the test database
+        run: npx node-pg-migrate up -m src/db/migrations -d TEST_DATABASE_URL
+
+      - name: Test
+        run: npm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build server and client
+        run: npm run build
+
+      # The deploy artifact. The droplet cannot build this itself.
+      - name: Upload the built client
+        uses: actions/upload-artifact@v7
+        with:
+          name: client-${{ github.sha }}
+          path: dist/client
+          if-no-files-found: error
+          retention-days: 14

@@ -16,9 +16,30 @@ Style: baseline first, then one h3 per change with date and a one-line descripti
 
 ## Major Implemented Workstreams
 
+- **CI and automated code review** (2026-09-08): five GitHub Actions workflows — quality gate with a real PostgreSQL 17, Claude PR review, `@claude` on demand, CodeQL, dependency review. `.github/workflows/`.
 - **Walking skeleton** (2026-09-08): guest nickname join, single-room chat, WebSocket fan-out, persisted to Postgres. First application code in the project. `src/db/`, `src/server/`, `src/client/`, `src/shared/`. See changelog entry below for the full account.
 
 ## Change log
+
+### CI and automated code review on GitHub Actions: complete, 2026-09-08
+
+**First CI in the project.** `.github/workflows/` created from nothing — the repository had no `.github/` directory. Scope confirmed by the user across two HITL rounds (7 questions) before any file was written.
+
+Five workflows:
+
+| File | Trigger | Purpose |
+|---|---|---|
+| `ci.yml` | every PR (any base) + push to `docs/data-model-approval`, `main` | `lint`, `typecheck`, tests against a `postgres:17` service container, `build` + `dist/client` artifact |
+| `claude-code-review.yml` | same-repo, non-draft PRs | `anthropics/claude-code-action@v1` review, sticky comment, prompt grounded in `docs/CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/PATTERNS/` and the DM baseline guardrail |
+| `claude.yml` | `@claude` mention on issues, PRs, review comments | On-demand Claude, `contents: write` because a human invoked it |
+| `codeql.yml` | PRs, pushes, weekly cron | CodeQL `javascript-typescript`, `security-and-quality`, `build-mode: none` |
+| `dependency-review.yml` | every PR | Fails the PR on a newly-introduced `high`+ advisory |
+
+**Test job runs against a real database, not a mock.** The `_test` database is created explicitly with `psql` and migrated with `node-pg-migrate`, because `docker/postgres-init/` only runs under Docker Compose and never for an Actions service container. This is the direct consequence of the 2026-09-08 migration defect recorded above: reading a migration path proves nothing, running it proves something, so CI runs it on every PR.
+
+**Fork PRs are skipped by the Claude workflows.** The repository is public, GitHub withholds secrets from fork PRs, and running Claude with write permissions over untrusted fork content is a prompt-injection path.
+
+**Known incomplete:** the `CLAUDE_CODE_OAUTH_TOKEN` secret does not exist yet, so both Claude jobs fail until `/install-github-app` is run. Neither is a required status check, so this cannot block a merge (`docs/TODO.md`).
 
 ### Walking skeleton implemented and end-to-end verified: complete, 2026-09-08
 

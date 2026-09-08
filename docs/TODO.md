@@ -14,9 +14,15 @@ Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Requir
 
 ## Blocking deployment (gated)
 
-### P0 — before gated deploy — build the client in CI, not on the droplet — `.github/workflows/`
+### P0 — before gated deploy — ship the CI-built client to the droplet — `.github/workflows/`
 
-The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. CI must build and ship `dist/client` as a deploy artifact. Without this the deploy produces a server with no UI, and nothing fails loudly.
+The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. Without a shipped build the deploy produces a server with no UI, and nothing fails loudly.
+
+**Half done, 2026-09-08.** `.github/workflows/ci.yml` builds the client and uploads `dist/client` as an artifact. **Nothing consumes that artifact** — no deploy workflow exists, so the remaining half is a CD job that downloads it onto the droplet.
+
+### P1 — before the AI review is useful — add the `CLAUDE_CODE_OAUTH_TOKEN` secret — repository settings
+
+`.github/workflows/claude-code-review.yml` and `claude.yml` reference a secret that does not exist yet, so both jobs fail on every PR until it is added. Run `/install-github-app` in an interactive Claude Code session. Deliberately not a required status check, so the missing secret cannot block a merge.
 
 ### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
 

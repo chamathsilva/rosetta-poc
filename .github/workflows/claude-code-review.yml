@@ -1,0 +1,69 @@
+# AI code review. Runs automatically on every pull request that comes from
+# this repository, and posts its findings as a single comment that is
+# rewritten in place on each new push (use_sticky_comment).
+#
+# Credentials: the CLAUDE_CODE_OAUTH_TOKEN secret, added by running
+# `/install-github-app` in an interactive Claude Code session. Until that
+# secret exists this job fails - it is deliberately NOT a required check,
+# so a missing secret cannot block a merge.
+#
+# Pull requests from forks are skipped: GitHub withholds secrets from them,
+# so the job could only fail, and running Claude over untrusted fork content
+# with write permissions is a prompt-injection path.
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude review
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          use_sticky_comment: true
+          prompt: |
+            Review this pull request. This repository has two subjects: a chat
+            product and an evaluation of the Rosetta instruction layer - read
+            docs/CONTEXT.md before judging whether a change is in scope.
+
+            Ground the review in the repository's own decisions, not in generic
+            best practice:
+
+            - docs/ARCHITECTURE.md - the data model is approved and each
+              decision carries its reason. Flag any change that silently
+              reverses one, including the connection-pool keys in src/db/pool.ts.
+            - docs/PATTERNS/ - parameterized pg queries only (no string-built
+              SQL, no ORM), escaped rendering of user content, JWT cookie
+              sessions, env-var config with fail-fast.
+            - docs/TODO.md - known gaps. Do not re-report them as new findings.
+            - 1:1 direct messaging is the reserved no-Rosetta baseline feature.
+              Flag any DM schema, endpoint, spec or plan as a guardrail breach.
+            - WebSocket disconnect cleanup is the known bug class for the
+              in-process room design: a socket must leave the Set on close and
+              on error, and the Set must be deleted when empty.
+
+            Report correctness defects, security issues and pattern violations,
+            each with the file and line. Say plainly when you find nothing.
+            Do not restate the diff, and do not approve or request changes as a
+            formal review - comment only.

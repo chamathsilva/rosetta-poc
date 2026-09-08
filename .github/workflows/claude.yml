@@ -30,6 +30,9 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
+      # claude-code-action exchanges the workflow's OIDC token; without this
+      # it fails before it ever reads the credentials secret.
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:

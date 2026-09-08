@@ -14,7 +14,7 @@ Use when: writing any code in `src/db/` or any server code issuing a SQL stateme
 ## Template
 
 ```ts
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 export interface MessageRow {
   readonly id: string;
@@ -24,8 +24,16 @@ export interface MessageRow {
 }
 
 // Correct: every value goes through a placeholder, never string interpolation.
+//
+// First parameter is `Pool | PoolClient` (both expose the same `query`), not
+// `Pool` alone - a caller that already holds a client (e.g. mid-transaction,
+// or holding it across other statements) must be able to pass it instead of
+// implicitly acquiring a second connection. Typing this narrower than that
+// pushes every such caller into a resource inversion: with a bounded pool,
+// enough concurrent callers acquiring a second connection while holding a
+// first can exhaust the pool entirely.
 export async function getMessagesForRoom(
-  pool: Pool,
+  pool: Pool | PoolClient,
   roomId: string,
   limit: number,
 ): Promise<readonly MessageRow[]> {
@@ -33,7 +41,7 @@ export async function getMessagesForRoom(
     `SELECT id, author_nickname, body, created_at
        FROM messages
       WHERE room_id = $1 AND deleted_at IS NULL
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT $2`,
     [roomId, limit],
   );
@@ -44,10 +52,11 @@ export async function getMessagesForRoom(
 // `SELECT * FROM messages WHERE room_id = '${roomId}'`  <-- forbidden
 ```
 
-Two details that are not stylistic:
+Three details that are not stylistic:
 
 - The column is `author_nickname`, not `nickname` — see the approved data model in `docs/ARCHITECTURE.md`. It is the snapshot taken at write time, which is what survives a guest row being reaped.
 - `deleted_at IS NULL` belongs in every read of `messages` that a user will see. Removal is a soft delete, so omitting this filter shows moderated content back to users.
+- **`ORDER BY created_at DESC, id DESC` needs both keys, not just the first.** Sorting after retrieval cannot repair which rows were selected: with `created_at DESC` alone, a timestamp tie straddling the `LIMIT` boundary lets Postgres return either tied row, so two callers can get different result sets for the same query. `LIMIT` must apply to a total order; `id` (a `uuid` primary key) is enough to make ties impossible.
 
 ## Extension points
 

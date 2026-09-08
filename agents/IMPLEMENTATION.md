@@ -16,9 +16,36 @@ Style: baseline first, then one h3 per change with date and a one-line descripti
 
 ## Major Implemented Workstreams
 
-None. No workstream has produced code.
+- **Walking skeleton** (2026-09-08): guest nickname join, single-room chat, WebSocket fan-out, persisted to Postgres. First application code in the project. `src/db/`, `src/server/`, `src/client/`, `src/shared/`. See changelog entry below for the full account.
 
 ## Change log
+
+### Walking skeleton implemented and end-to-end verified: complete, 2026-09-08
+
+**First application code in the project.** `coding-flow`, sized MEDIUM, four parallel/sequential batches (B0 scaffold+patterns solo, B1 db+server and B2 client in parallel, B3 integration solo), each independently verified by the orchestrator — files read in full, every gate command re-run directly, not accepted from subagent self-reports.
+
+**Scope**: guest joins with a nickname, sends and receives messages in one hardcoded room, persisted to PostgreSQL. No registration, no multi-room, no presence, no moderation, no rate limiting — all explicitly out of scope. 1:1 DM untouched (protected no-Rosetta baseline).
+
+**Gate history — the load-bearing fact of this feature.** The design was rejected and revised across **9 human review rounds** (~40 findings, all verified before acting, none disputed by the reviewing architect once evidence was shown). The plan was rejected once and revised twice more after implementation-time discoveries. In every round after the first, defects were found by the user, not by the AI review chain — the orchestrator's own verification passes checked citations (does this document quote its source correctly) and missed load-bearing assertions (is this claim actually true), which is where the real defects lived. Two exceptions: the architect caught the orchestrator's own wrong heap-memory arithmetic and a wrong claim about `pg`'s query-queueing behavior, both times by measuring or reading source rather than arguing.
+
+**What execution caught that nine rounds of reading could not.** The moment a real, credentialed PostgreSQL instance existed (session 2026-09-08, a pre-existing system install on the user's machine, a role created via a live DBeaver session since the superuser password was unknown), running `npm run migrate` for the first time in this project's history printed CLI help text and did nothing — `node-pg-migrate` requires a positional `up`/`down` verb that had been missing from `package.json`'s script since round 4 of the design review. Nine design rounds, two plan rounds, and a full server implementation all verified the migration path, the file extension, and the CLI flag — none of them ran the command. Fixed in one word. Recorded in `agents/MEMORY.md` as a distinct failure class from the document-review misses above: some defects are only reachable by execution, and no amount of additional reading finds them.
+
+**End-to-end verification (B3), first real run in this project**: real server process, real HTTP + WebSocket clients, two concurrent guest sessions, a hard `kill -9` and restart to prove nothing lived only in memory, direct database queries at every step rather than trusting an HTTP status code. All 19 SPECS acceptance criteria demonstrated against the real database. Full test suite: 79 tests, 79 pass, 0 fail, 0 skipped (up from 78/77/1-skipped before a database existed — the previously-deferred `AC-19` test now runs for real, including a test that proves a timed-out connection is *destroyed* rather than silently recycled, by checking the backend process id changes across a `max:1` pool).
+
+**Zero genuine code defects found in the implementation itself** (B1 server, B2 client) by either the execution-based validation or the orchestrator's own full read-through of every file produced. The only defects found post-approval were the migration script (above) and one the orchestrator introduced and caught in itself: `TEST_DATABASE_URL` had been placed in the server's fail-fast `REQUIRED` config, which would have forced the production droplet to carry a variable it never uses — root-caused to the plan's own wording, corrected in both the code and the plan.
+
+**Cost** (subagent tokens where individually tracked; orchestrator/main-thread cost not separately metered with the same rigor — see `docs/EVALUATION-LOG.md`'s standing note on main-thread token measurement being unreliable across turns):
+
+| Phase | Tokens (subagent) | Notes |
+|---|---|---|
+| Design (9 rounds) | ~230,000 | Architect (opus), resumed with context each round, not respawned |
+| Plan (tech-specs + plan, 2 review rounds + phase-5 review) | not separately totalled | Architect (opus) + one reviewer (sonnet, 118,218 tokens for phase-5 review alone) |
+| B0 — scaffold, config, 10 pattern-file edits | 119,842 | Engineer (sonnet) |
+| B1 — db + server | 232,070 | Engineer (sonnet), 108 tool uses |
+| B2 — client | 93,417 | Engineer (sonnet) |
+| B3 — end-to-end integration | 134,114 | Validator (sonnet), 60 tool uses |
+
+**Built WITH Rosetta.** This is the feature the no-Rosetta 1:1 DM baseline will eventually be measured against — the design-phase cost in particular should not be blended into that comparison without note, since a 9-round human review gate is a property of this run's rigor, not necessarily of every future feature built the same way.
 
 ### Project scaffolded (adhoc-flow): complete, 2026-09-04
 

@@ -8,10 +8,6 @@ An item leaves this file when it is done (→ `agents/IMPLEMENTATION.md`) or whe
 
 ## Blocking the first line of code
 
-### P0 — before walking skeleton — bootstrap the first admin — `src/db/`
-
-Nothing in the application can create the first admin: `bans.created_by` and `moderation_actions.actor_id` both require an existing admin row. Needs a seed migration or a documented manual `UPDATE users SET is_admin = true`. Surfaced by the 2026-09-04 data model review; previously unowned.
-
 ### P0 — before walking skeleton — establish the cost-recording habit — `docs/EVALUATION-LOG.md`
 
 Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Required by `docs/CONTEXT.md` evaluation guardrails. **Resolved (Phase 8): home is `docs/EVALUATION-LOG.md`, append-only, one row per feature.** Habit still needs to be exercised starting with the first feature.
@@ -29,6 +25,10 @@ The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencie
 ### P1 — before gated deploy — verify `bcrypt` loads on the droplet — `docs/DEPENDENCIES.md`
 
 `bcrypt` is a native module. npm 11 blocks install scripts by default, so it works locally only because the package ships a prebuilt binary for darwin-arm64. If no prebuild matches the droplet's architecture, `npm ci` succeeds and the server then fails at first import. Verify before relying on the deploy, or approve the install script explicitly.
+
+### P0 — before gated deploy — trust the proxy for client IPs — `src/server`
+
+`messages.ip` is captured from `req.socket.remoteAddress`. Once Caddy fronts the process this records **Caddy's address, not the client's**, so every row carries the same useless value and nothing fails visibly. Requires a **trusted-proxy-aware `X-Forwarded-For` extractor in the upgrade handler itself**, plus Caddy configured to set the header. Express `trust proxy` is **not sufficient and not applicable**: a raw `http.Server` `'upgrade'` event never enters the Express middleware chain, so the setting cannot affect the request the IP is actually read from. Express `trust proxy` still covers `POST /api/join` and `GET /api/session`; the WebSocket path needs its own extractor. Corrected 2026-09-07 — the original wording named a remediation that cannot work for the path that captures the IP. **REQ-MOD-003 (IP + timestamp logging) is unsatisfiable until this is done** — the column would be populated but worthless. Raised by the walking-skeleton design 2026-09-05; the feature itself runs locally and is unaffected.
 
 ### P1 — before gated deploy — implement the launch gate — `docs/ARCHITECTURE.md`
 
@@ -59,6 +59,12 @@ Privacy control, not storage housekeeping. A dump that outlives the retention wi
 ### P0 — with `server/http` — send a Content-Security-Policy header — `src/server/http`
 
 Raised by independent review 2026-09-04: React's escaping is currently the only XSS defence, and it is defeated by a single bad line. A CSP survives one. `script-src 'self'` without `'unsafe-inline'` is compatible with Vite's hashed output, so this does not need the policy loosened to work. Build it with `server/http`, not as a later hardening pass. Rule recorded in `docs/PATTERNS/untrusted-content-rendering.md`.
+
+### P0 — before the moderation floor — bootstrap the first admin — `src/db/`
+
+Nothing in the application can create the first admin: `bans.created_by` and `moderation_actions.actor_id` both require an existing admin row. Needs a seed migration or a documented manual `UPDATE users SET is_admin = true`. Surfaced by the 2026-09-04 data model review.
+
+**Reclassified 2026-09-05** from "before walking skeleton". It never blocked the skeleton — that feature touches no admin, no bans and no moderation actions, and migrates only `users`/`rooms`/`messages`. The misfiling was identified verbally during the skeleton design and left unedited for three rounds, formally blocking implementation the whole time.
 
 ### P0 — before public launch — implement the moderation floor — `src/server/moderation`
 

@@ -29,19 +29,19 @@ Target on resolution: `gain.json`, `docs/TECHSTACK.md`.
 
 Was never recorded as an open question, yet `docs/CONTEXT.md` mandated `typescript-lsp` while `docs/TECHSTACK.md` and `docs/DEPENDENCIES.md` described a plain-JavaScript stack. Resolved by the user: **TypeScript**, compiled by `tsc` to `dist/`. No phase of `init-workspace-flow` caught the contradiction.
 
-### Test framework and linter: not chosen [OPEN]
+### Test framework and linter: `node:test` + `tsx`, `typescript-eslint` [RESOLVED — 2026-09-05, → `docs/DEPENDENCIES.md`]
 
-Confidence: n/a — `docs/DEPENDENCIES.md` records "likely jest or mocha" and "likely eslint" as guesses, not decisions.
-Target on resolution: `docs/DEPENDENCIES.md`.
+Decided during the walking-skeleton design gate. Node 24's built-in test runner needs no new heavyweight dependency; `tsx` runs TypeScript test files directly; `typescript-eslint` is the standard linter for the stack. Chosen over Vitest for the smaller dependency footprint — the app gains nothing from a faster watch mode, only the dev workflow would.
 
 ### JWT lifetime: 24h guest, 30d registered [RESOLVED — 2026-09-04, → `docs/ARCHITECTURE.md`]
 
 Was never specified by any source and only surfaced because guest reaping depends on it. The guest value also sets when a nickname returns to the pool.
 
-### Connection pooling configuration: unspecified [OPEN]
+### Connection pooling: `max: 10`, `idleTimeoutMillis: 30_000`, `connectionTimeoutMillis: 5_000` [RESOLVED — 2026-09-05, → `docs/ARCHITECTURE.md`]
 
-Confidence: n/a. `pg` is chosen; pool sizing against a 1 GB co-hosted droplet is not. Pool size interacts with the memory ceiling.
-Target on resolution: `docs/ARCHITECTURE.md`.
+Decided at the walking-skeleton design gate, which is the feature that creates the pool. Each pooled connection is a real Postgres backend process drawing on the same 1 GB the app and Caddy share, so the cap is a memory decision rather than a throughput one. 10 is generous for a single-instance chat app whose database reads are one history query per join.
+
+Not validated against the single-instance capacity ceiling, which remains unmeasured — see that entry.
 
 ### Client framework departs from the pre-Rosetta design [RESOLVED — 2026-09-04, → `docs/ARCHITECTURE.md`]
 
@@ -52,6 +52,12 @@ Recorded here because `docs/CONTEXT.md` requires departures from the pre-decided
 Open consequences, not yet resolved:
 - The React payload (~60 KB gzipped, no CDN) has not been weighed against the single-instance capacity ceiling, which is itself unmeasured.
 - `docs/PATTERNS/untrusted-content-rendering.md` had to be rewritten: the XSS surface moved from `innerHTML` to `dangerouslySetInnerHTML`.
+
+### PostgreSQL major version: 17, and the droplet must match [OPEN]
+
+Confidence: medium. Chosen 2026-09-07 when local provisioning was decided (Docker Compose, `compose.yml` pinning 17). The droplet is not provisioned, so nothing yet enforces that it installs the same major.
+**The risk is silent drift**: local tests pass against 17 while the droplet runs whatever its distribution defaults to. Verify at provisioning time.
+Target on resolution: `docs/ARCHITECTURE.md`, `agents/IMPLEMENTATION.md`.
 
 ## Unproven operations
 

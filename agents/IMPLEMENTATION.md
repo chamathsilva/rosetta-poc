@@ -39,7 +39,11 @@ Five workflows:
 
 **Fork PRs are skipped by the Claude workflows.** The repository is public, GitHub withholds secrets from fork PRs, and running Claude with write permissions over untrusted fork content is a prompt-injection path.
 
-**Known incomplete:** the `CLAUDE_CODE_OAUTH_TOKEN` secret does not exist yet, so both Claude jobs fail until `/install-github-app` is run. Neither is a required status check, so this cannot block a merge (`docs/TODO.md`).
+**Verified on PR #3, not assumed.** CI, CodeQL and dependency review all pass against the real repository. Two defects were found by running them, both invisible to review: `id-token: write` was missing, so the Claude action failed on an OIDC exchange before it ever reached its credentials; and the repository's Dependency graph was off, so `dependency-review` errored out. The Dependency graph is now enabled.
+
+**Known incomplete:** the Claude GitHub App is not installed, so both Claude jobs fail with `Claude Code is not installed on this repository` until `/install-github-app` is run. Neither is a required status check, so this cannot block a merge (`docs/TODO.md`).
+
+**Branch protection** on `docs/data-model-approval` requires *Lint and typecheck*, *Tests (PostgreSQL 17)*, *Build* and *Analyze (javascript-typescript)*. Admins are exempt and no approving review is required — this is a solo repository, and a required approval would make every PR unmergeable.
 
 ### Walking skeleton implemented and end-to-end verified: complete, 2026-09-08
 

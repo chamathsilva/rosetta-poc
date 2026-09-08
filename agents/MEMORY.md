@@ -46,6 +46,12 @@ Keep template entries so that AI knows how to fill them in later on.
 - Under systemd a clean immediate exit reads as a healthy unit, so this would have been much harder to diagnose than a crash.
 - Rule: when writing a placeholder whose purpose is to fail, run it and confirm a non-zero exit. Intent expressed in a comment is not behaviour.
 
+### A GitHub Action's `permissions` block is part of its contract, not boilerplate [ACTIVE]
+
+- `anthropics/claude-code-action@v1` exchanges the workflow's OIDC token, so without `id-token: write` it fails before it ever reads the credentials secret. The error names OIDC, not the missing permission's consequence.
+- Both Claude workflows were authored from the action's own `action.yml` inputs, which say nothing about required permissions — the inputs are documented, the permissions are not.
+- Rule: after adding a third-party action, run it once and read the failure, rather than assuming the permissions copied from an example are complete. Permission defects surface only at execution, like the migration verb defect below.
+
 ### \<Generalized Preventive Rule\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]

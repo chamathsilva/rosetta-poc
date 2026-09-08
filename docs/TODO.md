@@ -22,7 +22,7 @@ The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencie
 
 ### P1 — before the AI review is useful — add the `CLAUDE_CODE_OAUTH_TOKEN` secret — repository settings
 
-`.github/workflows/claude-code-review.yml` and `claude.yml` reference a secret that does not exist yet, so both jobs fail on every PR until it is added. Run `/install-github-app` in an interactive Claude Code session. Deliberately not a required status check, so the missing secret cannot block a merge.
+`.github/workflows/claude-code-review.yml` and `claude.yml` both fail on every PR until Claude has credentials. Observed on PR #3: `Claude Code is not installed on this repository`. Fix by running `/install-github-app` in an interactive Claude Code session — it installs the GitHub App and adds the `CLAUDE_CODE_OAUTH_TOKEN` secret the workflows reference. Deliberately **not** a required status check, so this cannot block a merge.
 
 ### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
 

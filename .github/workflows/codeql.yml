@@ -11,7 +11,7 @@ on:
   pull_request:
   push:
     branches:
-      - docs/data-model-approval
+      - develop
       - main
   schedule:
     # Weekly, so newly published queries reach existing code without a push.

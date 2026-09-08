@@ -30,8 +30,8 @@ Five workflows:
 | File | Trigger | Purpose |
 |---|---|---|
 | `ci.yml` | every PR (any base) + push to `docs/data-model-approval`, `main` | `lint`, `typecheck`, tests against a `postgres:17` service container, `build` + `dist/client` artifact |
-| `claude-code-review.yml` | same-repo, non-draft PRs | `anthropics/claude-code-action@v1` review, sticky comment, prompt grounded in `docs/CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/PATTERNS/` and the DM baseline guardrail |
-| `claude.yml` | `@claude` mention on issues, PRs, review comments | On-demand Claude, `contents: write` because a human invoked it |
+| `claude-code-review.yml` | every PR | `anthropics/claude-code-action@v1`, inline comments via the `code-review` plugin — **the `/install-github-app` version, kept over the hand-written one [USER-DECIDED]** |
+| `claude.yml` | `@claude` mention on issues, PRs, review comments | On-demand Claude — same provenance |
 | `codeql.yml` | PRs, pushes, weekly cron | CodeQL `javascript-typescript`, `security-and-quality`, `build-mode: none` |
 | `dependency-review.yml` | every PR | Fails the PR on a newly-introduced `high`+ advisory |
 
@@ -41,7 +41,9 @@ Five workflows:
 
 **Verified on PR #3, not assumed.** CI, CodeQL and dependency review all pass against the real repository. Two defects were found by running them, both invisible to review: `id-token: write` was missing, so the Claude action failed on an OIDC exchange before it ever reached its credentials; and the repository's Dependency graph was off, so `dependency-review` errored out. The Dependency graph is now enabled.
 
-**Known incomplete:** the Claude GitHub App is not installed, so both Claude jobs fail with `Claude Code is not installed on this repository` until `/install-github-app` is run. Neither is a required status check, so this cannot block a merge (`docs/TODO.md`).
+**Reconciled with parallel human work, 2026-09-08.** While this branch was in review the user created `develop` as the integration branch, retargeted the PR onto it, and ran `/install-github-app`, whose PR #4 merged workflows at the same two paths — an add/add conflict between two independent solutions to the same problem. Resolved by **keeping the vendor-generated workflows and discarding the hand-written pair**, and by retargeting the CI and CodeQL push triggers from `docs/data-model-approval` to `develop`. Cost of the collision: the hand-written draft/fork guards and the repository-grounded review prompt (`docs/TODO.md`).
+
+**Credentials resolved 2026-09-08.** The Claude jobs failed with `Claude Code is not installed on this repository` until the user ran `/install-github-app`; the `CLAUDE_CODE_OAUTH_TOKEN` secret now exists. Neither Claude job is a required status check, so the failures never blocked a merge.
 
 **Validated by deliberate failure, not by a green run** (2026-09-08, throwaway PR #5, since closed and its branch deleted). A passing check is equally consistent with the check not running, so each one was made to fail on purpose (`agents/MEMORY.md`, *Prove a config is doing work by making it fail on purpose*):
 

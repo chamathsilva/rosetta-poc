@@ -24,9 +24,9 @@ The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencie
 
 On `pull_request` events `github.sha` is the ephemeral merge commit, so the artifact uploaded by the build job is `client-<merge sha>` — a commit that exists in no branch. Found by validation 2026-09-08. Harmless today because nothing consumes the artifact; it becomes a silent lookup failure the moment a deploy job resolves it by head SHA. Use `github.event.pull_request.head.sha || github.sha`.
 
-### P1 — before the AI review is useful — add the `CLAUDE_CODE_OAUTH_TOKEN` secret — repository settings
+### P2 — before public launch — the Claude workflows have no fork or draft guard — `.github/workflows/`
 
-`.github/workflows/claude-code-review.yml` and `claude.yml` both fail on every PR until Claude has credentials. Observed on PR #3: `Claude Code is not installed on this repository`. Fix by running `/install-github-app` in an interactive Claude Code session — it installs the GitHub App and adds the `CLAUDE_CODE_OAUTH_TOKEN` secret the workflows reference. Deliberately **not** a required status check, so this cannot block a merge.
+The vendor-generated workflows were kept over guarded alternatives **[USER-DECIDED — 2026-09-08]**. Consequence on a **public** repository: a pull request from a stranger's fork triggers them, and GitHub withholds secrets from fork runs, so the checks fail on every outside contribution. Draft PRs are also reviewed, which spends tokens on unfinished work. Neither is a required check, so neither blocks a merge. Revisit if outside PRs ever arrive.
 
 ### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
 

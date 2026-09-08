@@ -12,7 +12,7 @@ on:
   pull_request:
   push:
     branches:
-      - docs/data-model-approval
+      - develop
       - main
 
 # A new push supersedes the run already in flight for the same ref.

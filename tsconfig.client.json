@@ -9,13 +9,14 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "rootDir": "src/client",
+    "rootDir": "src",
     "noEmit": true,
     "types": []
   },
   "include": [
     "src/client/**/*.ts",
-    "src/client/**/*.tsx"
+    "src/client/**/*.tsx",
+    "src/shared/**/*.ts"
   ],
   "exclude": [
     "node_modules",

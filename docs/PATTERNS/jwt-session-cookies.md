@@ -12,6 +12,7 @@ Use when: writing any code that establishes, reads, or upgrades a session — gu
 - JWT MUST be verified (signature + expiry) on every request that reads identity from it — never decoded without verification.
 - Guest and registered identities share the same cookie/claim mechanism, distinguished by a claim (e.g. `type: 'guest' | 'registered'`), not by separate cookies — this is what makes "guest upgrade" a claim rewrite rather than a session-migration problem.
 - Signing secret comes from environment configuration (see `env-config-secrets.md`), never hardcoded.
+- **Every session — guest included — carries a `userId` that is a real `users.id`.** `docs/ARCHITECTURE.md` "Guests get a `users` row" made guests real rows, and any FK from application data to `users(id)` (e.g. `messages.author_id`) needs the id in the claims to avoid a re-lookup by nickname on every write.
 
 **[USER-DECIDED, Phase 8]** Framework is now Express; `req.cookies` requires the `cookie-parser` middleware, which is the chosen dependency (`docs/DEPENDENCIES.md`).
 
@@ -23,12 +24,20 @@ import jwt from 'jsonwebtoken';
 import { loadConfig } from './config.js';   // ESM: the .js extension is required
 
 export type SessionClaims =
-  | { readonly type: 'guest'; readonly nickname: string }
+  | { readonly type: 'guest'; readonly userId: string; readonly nickname: string }
   | { readonly type: 'registered'; readonly userId: string; readonly nickname: string };
 
 // docs/ARCHITECTURE.md "Session model" [USER-DECIDED]. Fixed values, not env-tunable.
 const GUEST_TTL = '24h';
 const REGISTERED_TTL = '30d';
+
+// Same values as GUEST_TTL/REGISTERED_TTL, in milliseconds, for the cookie's
+// own maxAge (see the fifth load-bearing detail below) - one source, two
+// units, not two independent decisions.
+const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
+const REGISTERED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export const SESSION_COOKIE = 'session';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -42,26 +51,47 @@ const COOKIE = {
   sameSite: 'lax',
 } as const;
 
-export function issueGuestSession(res: Response, nickname: string): void {
-  const token = jwt.sign({ type: 'guest', nickname }, loadConfig().jwtSecret, {
+export function issueGuestSession(res: Response, userId: string, nickname: string): void {
+  const token = jwt.sign({ type: 'guest', userId, nickname }, loadConfig().jwtSecret, {
     expiresIn: GUEST_TTL,
   });
-  res.cookie('session', token, COOKIE);
+  res.cookie(SESSION_COOKIE, token, { ...COOKIE, maxAge: GUEST_TTL_MS });
+}
+
+// Verifies signature and expiry, THEN narrows the decoded payload's shape at
+// runtime. `jwt.verify` proves the token was signed with our secret and is
+// unexpired - it proves nothing about what shape was signed. Returns null on
+// any failure (bad signature, expired, or wrong shape); callers must reject
+// on null, not fall through.
+export function verifySessionToken(token: string): SessionClaims | null {
+  let payload: unknown;
+  try {
+    payload = jwt.verify(token, loadConfig().jwtSecret);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== 'object' || payload === null) return null;
+  const p = payload as Record<string, unknown>;
+  if (p['type'] !== 'guest' && p['type'] !== 'registered') return null;
+  if (typeof p['userId'] !== 'string' || p['userId'].length === 0) return null;
+  if (typeof p['nickname'] !== 'string' || p['nickname'].length === 0) return null;
+  if (typeof p['exp'] !== 'number') return null;
+  return { type: p['type'], userId: p['userId'], nickname: p['nickname'] };
 }
 
 export function requireSession(req: Request, res: Response, next: NextFunction): void {
-  const token: unknown = req.cookies?.['session'];
+  const token: unknown = req.cookies?.[SESSION_COOKIE];
   if (typeof token !== 'string') {
     res.status(401).end();
     return;
   }
-  try {
-    // MUST verify signature and expiry. Never jwt.decode().
-    req.session = jwt.verify(token, loadConfig().jwtSecret) as SessionClaims;
-    next();
-  } catch {
+  const claims = verifySessionToken(token);
+  if (claims === null) {
     res.status(401).end();
+    return;
   }
+  req.session = claims;
+  next();
 }
 
 export function upgradeGuestToRegistered(existing: SessionClaims, userId: string): string {
@@ -73,13 +103,16 @@ export function upgradeGuestToRegistered(existing: SessionClaims, userId: string
 }
 ```
 
-This template compiles clean under the repo's `tsconfig.json` — verified, not assumed. Three details that are load-bearing:
+This template compiles clean under the repo's `tsconfig.json` — verified, not assumed. Five details that are load-bearing:
 
 - **The secret comes from `loadConfig()`, never a raw `process.env.JWT_SECRET` read.** Under `noUncheckedIndexedAccess` that read is `string | undefined`, which `jwt.sign` rejects. Routing it through the config module is both the fail-fast contract in `env-config-secrets.md` and the only form that typechecks.
 - **Lifetimes are constants here, not environment variables.** `docs/ARCHITECTURE.md` records them as decided facts. Keeping one copy is what prevents the registered lifetime drifting away from the decision — which it previously had, to 7 days.
 - **`GUEST_TTL` reaches past sessions.** The maintenance task reaps guest `users` rows on it, so changing it also changes when a nickname returns to the pool.
+- **`messages.author_id` is nullable** (`docs/ARCHITECTURE.md` "Data model — APPROVED": `author_id uuid REFERENCES users(id) ON DELETE SET NULL`), and `pg` maps a JavaScript `undefined` parameter to SQL `NULL`. A claim missing `userId` therefore does **not** fail an insert that uses it — it silently writes an authorless message indistinguishable from a reaped-guest row. `verifySessionToken`'s runtime check above is what prevents that; the foreign key does not.
+- **The cookie carries its own `maxAge`, matching the token's lifetime.** `COOKIE` previously had no `maxAge`, which RFC 6265 SS4.1.2.2 makes a browser-session cookie — discarded when the browser closes, regardless of the JWT's own expiry. Without this, a returning user is logged out on browser restart even though their token is still valid. `maxAge` is derived from the same constants that produce `GUEST_TTL`/`REGISTERED_TTL` so the cookie and the token it carries always expire together.
 
 ## Extension points
 
 - Token lifetime differs by type: **24h guest, 30d registered** (`docs/ARCHITECTURE.md`, [USER-DECIDED]). Adjust the constants, never the verification path.
 - No refresh-token flow is planned; re-authentication on expiry is the accepted behavior unless a future decision changes this.
+- `upgradeGuestToRegistered` reuses `existing.userId` — it does not receive or generate a new id — matching "guest upgrade becomes a flag flip on an existing row." Guest upgrade itself is out of scope for the walking skeleton; this signature is documented no further than needed to typecheck.

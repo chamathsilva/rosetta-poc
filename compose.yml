@@ -1,0 +1,29 @@
+# Local Postgres for development and tests. PostgreSQL 17 - the same major
+# the droplet installs in production, so local and production cannot drift
+# silently. [USER-DECIDED — 2026-09-07], plans/walking-skeleton/
+# WALKING-SKELETON-PLAN.md "Test database and reset safety".
+#
+# Bring up: docker compose up -d
+# The app database and the dedicated _test database (TEST_DATABASE_URL,
+# .env.example) both live in this one container, as separate databases.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rosetta
+      POSTGRES_PASSWORD: rosetta
+      POSTGRES_DB: rosetta_poc
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rosetta -d rosetta_poc']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

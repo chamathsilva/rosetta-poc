@@ -37,8 +37,8 @@ Versions below are **INSTALLED** as of 2026-09-04 and resolved from `package-loc
 | `@types/react`, `@types/react-dom` | Type definitions | 19.2.18 / 19.2.7 | INSTALLED |
 | `vite` | Client bundler → `dist/client` | 8.2.2 | INSTALLED |
 | `@vitejs/plugin-react` | React support for Vite | 6.1.1 | INSTALLED |
-| test framework | (TBD — open in `docs/ASSUMPTIONS.md`; `npm test` currently exits 1 by design) | — | NOT CHOSEN |
-| linter | (TBD — open in `docs/ASSUMPTIONS.md`) | — | NOT CHOSEN |
+| `tsx` | Runs TypeScript test files directly under Node's built-in `node:test` runner **[USER-DECIDED — 2026-09-05]**. No separate test framework: `node:test` ships with Node 24 | to be pinned at install | PLANNED |
+| `typescript-eslint` | Linter **[USER-DECIDED — 2026-09-05]** | to be pinned at install | PLANNED |
 
 ## Infrastructure
 

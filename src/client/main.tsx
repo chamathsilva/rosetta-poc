@@ -1,13 +1,14 @@
-// SCAFFOLD STUB - build-pipeline verification only, no product behaviour.
-// Replaced by the walking skeleton. See docs/TODO.md.
+// Walking skeleton client entry point. Mounts <App />, which owns the
+// join-vs-chat bootstrap decision (GET /api/session on mount - see App.tsx).
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { App } from './App';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root');
 
 createRoot(container).render(
   <StrictMode>
-    <p>Scaffold only.</p>
+    <App />
   </StrictMode>,
 );

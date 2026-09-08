@@ -70,6 +70,14 @@ Keep template entries so that AI knows how to fill them in later on.
 - It also reported the exact error codes, which made the fix verifiable in both directions rather than plausible.
 - Generalizes: when reviewing anything executable, give the reviewer the means to execute it and demand error output as evidence. Reading finds contradictions; running finds defects.
 
+### A subagent told to push back with evidence did so, twice, and was right both times [ACTIVE]
+
+- The walking-skeleton architect was instructed every round to dispute findings with evidence rather than comply silently. It disputed exactly twice, both times against the orchestrator, and was correct both times.
+- First: the orchestrator asserted a 200-frame buffer was 4.63 MB of heap. The architect measured 2.32 MB and explained why — V8 stores Latin-1 strings one byte per character, and a JSON-escaped NUL body is pure ASCII. The orchestrator reproduced 2.33 MB independently.
+- Second: the orchestrator reported a lost-message window as live. The architect showed it was structurally real but unreachable, citing `pg-pool`'s FIFO `_pendingQueue` (`push` at 207/231, `shift` at 156) — verified in source by the orchestrator. It then **made the fix anyway**, on the grounds that an invariant resting on a library's internal scheduling is not something a design should rest on.
+- The second is the more valuable behaviour: it neither complied silently nor used being right as grounds to refuse the change.
+- Generalizes: "push back with evidence" produces useful dissent only when the subagent is also told the standard of evidence. Both pushbacks cited a file and line or a measurement, because that was demanded. A bare instruction to "disagree if you disagree" would not have produced either.
+
 ### \<Generalized What Worked\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]
@@ -87,6 +95,47 @@ Keep template entries so that AI knows how to fill them in later on.
 - Hypothesis: every phase read the documents it owned and none read two documents against each other.
 - Root cause: `docs/CONTEXT.md` mandated `typescript-lsp` for navigation while `docs/TECHSTACK.md` and `docs/DEPENDENCIES.md` described a plain-JavaScript stack with no compiler, no `tsconfig` and no `@types`. The source language was never an entry in `docs/ASSUMPTIONS.md`, so no phase owned the question.
 - Problem: cross-document consistency has no owner. Phase 9 verification found staleness *within* documents, not disagreement *between* them. An unasked question cannot be flagged as unresolved, so it fails silently — the same shape as the `.gitignore` failure above.
+
+### Verifying a document's citations is not verifying its reasoning [ACTIVE]
+
+- The walking-skeleton design was produced by an opus architect, then spot-checked by the orchestrator before being presented for approval. The orchestrator verified two claims — that a pattern file contained a quoted line, and that a CLI flag existed — and both were true. That produced false confidence.
+- The user's review then found eight real defects, two of them factual errors the orchestrator had read past: an assertion that a null `author_id` "cannot author a message" (the column is nullable, so `pg` writes NULL and the insert succeeds), and a TOAST threshold rationale that is simply wrong for 2000 Unicode characters.
+- Root cause: the orchestrator verified the *citations* — claims of the form "document X says Y" — because those are cheap and mechanical to check. It did not verify the *reasoning* — claims of the form "therefore Z is safe" — which is where both errors lived.
+- Rule: when checking a design, separate its citations from its load-bearing assertions, and test the assertions against the schema or runtime behaviour they depend on. A correctly-cited document can still be unsound.
+
+### A decision lands in the file being edited, not the full set it belongs in [ACTIVE]
+
+- Three consecutive review rounds caught the same shape. Test framework: closed in `ASSUMPTIONS.md`, never moved to `DEPENDENCIES.md` — which the assumption entry itself named as its target. Pool sizing: recorded in `ASSUMPTIONS.md` and `ARCHITECTURE.md`, missed in `TECHSTACK.md`. IP-proxy follow-up: relayed to the user as "logged as a TODO", never written to `docs/TODO.md` at all.
+- Each time the orchestrator stated the update as done and it was partially or entirely not done. The user found all three.
+- Root cause: updates are made to whichever file is open in the moment, and the propagation set is reconstructed from memory instead of from the roster. `bootstrap_rosetta_files` already lists that roster.
+- Rule: before claiming a decision is recorded, enumerate its homes explicitly — a tech choice touches `TECHSTACK.md`, `DEPENDENCIES.md`, `ARCHITECTURE.md` and `ASSUMPTIONS.md`; a deferred action touches `TODO.md` — then grep for the old value to prove none survive. Saying "recorded" without that grep is an unverified claim.
+- **This rule was written, then violated in the same session.** A fourth instance followed immediately: the orchestrator told the user in prose that `docs/TODO.md`'s admin-bootstrap item was misfiled as blocking the walking skeleton, and never edited the file — leaving a P0 that formally blocked the feature for three review rounds. The rule as first written covered *decisions*, and this was a *correction noticed in conversation*, so it did not fire.
+- Stronger rule: **saying a file is wrong is not fixing it.** Any sentence of the form "that TODO is misfiled", "that doc is stale", "I should update X" is an action, not an observation — perform the edit in the same turn it is noticed, or it will not happen. Prose to the user is not a work queue.
+
+### Fixes introduce their own defects, and nobody checks the fix itself [ACTIVE]
+
+- Walking-skeleton design review, round 5: three of four findings were created by round 4's fixes. The ordered-batch merge introduced a frame-type assumption (error frames have no `id`/`created_at` and cannot be sorted into history). The cumulative byte cap introduced a false aggregate bound (pool size does not gate buffers, because a socket buffers *while waiting* for a client). The per-socket promise chain introduced a cancellation gap (queued INSERTs still run after the socket closes, and one rejection poisons the chain).
+- Each fix was correct for the defect it targeted and was reviewed only against that defect. Neither the author nor the orchestrator asked what the fix newly made possible.
+- The false-bound case is the sharpest: the design stated "bounded at 10 MiB across the `max: 10` pool" and, **two lines later**, described the pool-wait that disproves it. The contradiction was adjacent, in one file, and both an opus author and a verifying orchestrator read past it.
+- Rule: after fixing a defect, review the fix as new code — what does it now assume about its inputs, what does it hold open, what happens when it fails partway. A fix is not a smaller change than a feature; it is a feature with less scrutiny. State explicitly what new failure modes were checked for.
+
+### A self-check section produced false assurance instead of catching the defect [ACTIVE]
+
+- After fixes kept introducing new defects, the orchestrator required the architect to add a "failure modes introduced by these fixes — checked" section. It did. The section's central claim was **"Checked for deadlock: none. The initialization path holds exactly one client and never awaits a second."**
+- That was false. The step it described passed `pool` rather than the held client, so it *did* await a second — ten concurrent initializations would hold all ten clients and each block for an eleventh. The contradicting line sat 120 lines above the claim, and its own prose said "on the held client" while its argument said `pool`: one sentence disagreeing with itself.
+- The self-check did not catch the break. It added a confident assertion that there was no break, which is worse than silence — a reader who trusts the section stops looking.
+- Root cause: the section asked "did this introduce a problem?", which is answerable from memory of intent. It did not require pointing at the lines that would have to be true for the answer to hold.
+- Rule: a self-check must cite the specific line or step re-read to justify each claim. A check that cannot be traced to something actually re-read is not a check, and "no problem found" without that trace should be written as "not verified" instead. Applies to the orchestrator's own verification passes, which failed the same way in rounds 1-4.
+- **The rule was then broken by the orchestrator in the very next round, in a new way.** Asked to confirm a named-step conversion had removed all numeric step references, it ran `grep -on "step [0-9]"`, got no matches, and reported "NONE - fully converted". The pattern was case-sensitive and had no hyphen, so it missed `Steps 2-7` and `step-4 snapshot` in the same file. The user found both.
+- The failure is distinct from the false self-check and needs its own guard: there, a claim was made without looking; here, a real command was run whose *pattern did not cover the space it appeared to cover*. An empty grep result is ambiguous between "nothing there" and "wrong pattern", and it reads as the first.
+- Rule: when a search is the evidence, state the exact pattern alongside the result, and prefer a deliberately over-broad pattern that needs manual filtering over a narrow one that returns clean. Before trusting an empty result, run the pattern against a case you know should match — if it does not find that, it proves nothing about the rest.
+
+### The migration command itself was never once executed before this defect shipped [ACTIVE]
+
+- `package.json`'s `migrate` script read `node-pg-migrate -m src/db/migrations` from round 4 of the design review onward — nine design rounds, two plan rounds, a B0 scaffold, and a full B1 implementation all treated this as settled. It was wrong: `node-pg-migrate` requires a positional direction verb (`up`/`down`) as its first argument, and without one the CLI silently prints its help text and does nothing.
+- Every prior check was structural: `-m` resolving the right directory, file extension `.sql` governing execution, `-j sql` being creation-only. All correct, and none of them actually invoked the command against a database — because until this session, no reachable database existed.
+- The first time it ran for real (after obtaining credentials to a live Postgres), it printed help instead of migrating, immediately and unambiguously.
+- Generalizes: a command's argument list can be verified against documentation, `--help` text, and even its own source, and still be wrong in the one respect that only running it reveals. This is the same lesson as "prove a config is doing work by making it fail on purpose" (an earlier entry), one level up: some things cannot be proven by static inspection at all, only by execution — no amount of additional review rounds would have found this before a real database existed to run it against.
 
 ### \<Generalized What Failed\> [ACTIVE|RETIRED]
 
@@ -125,6 +174,14 @@ Keep template entries so that AI knows how to fill them in later on.
 - Found only because the user asked whether "erased" meant soft delete. No phase, review or gate surfaced it.
 - Fix: backup retention capped at 30 days, with each section naming the other so they cannot be changed independently.
 - Generalizes: any retention, deletion or erasure claim must be checked against every copy of the data — backups, WAL, replicas, logs — not only the live table.
+
+### An ambient NODE_ENV from .env silently doubled the shipped client bundle [ACTIVE]
+
+- `npm run build` intermittently produced a 393 KB client bundle instead of the expected 194 KB, with a different content hash each time. First dismissed as a non-reproducible anomaly after two clean retries came back at 194 KB.
+- It was not an anomaly. The two sizes corresponded to exactly two conditions: `NODE_ENV=development` present in the shell → 393 KB (React's development bundle, extra runtime checks); absent or `production` → 194 KB. The variable was leaking from `.env` (`NODE_ENV=development`, set there for the server's own conventions) into whichever shell had sourced it before running `vite build`.
+- `.env.example`'s own comment invites exactly the workflow that triggers this: "Copy to .env for local work." Any developer or CI step that sources `.env` before building ships the slower, larger bundle to production with no error, no warning, and a build that "succeeds."
+- Fixed: `"build:client": "NODE_ENV=production vite build"` — forces the client build's mode regardless of the ambient environment. Verified under the worst case (`NODE_ENV=development` explicitly exported) that the fix holds.
+- Generalizes: a build tool that appears to control its own mode (`vite build` is nominally always a production build) can still be silently overridden by an inherited environment variable if some part of its dependency chain (here, React itself) reads `process.env.NODE_ENV` directly rather than trusting the bundler's internal mode. An intermittent, hard-to-reproduce build artifact size is worth root-causing, not writing off after a couple of clean retries — retrying with the *same* ambient environment does not test the actual variable.
 
 ### \<Generalized Discovery\> [ACTIVE|RETIRED]
 

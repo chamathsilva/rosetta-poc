@@ -1,0 +1,111 @@
+# Evaluation Findings — Rosetta
+
+**Status: INTERIM.** Covers `init-workspace-flow`, one no-workflow session, one `adhoc-flow` run, and one full `coding-flow` run (the walking skeleton — design through phase 12 test review, implementation approved at the phase-10 gate). Does **not** cover the no-Rosetta DM baseline, which has not run. **No comparison exists yet**: everything here characterizes Rosetta's own process, observed once, on one feature, with one set of models. Generalize cautiously.
+
+Raw per-run cost data lives in `docs/EVALUATION-LOG.md`. This document is the cross-run synthesis, organized by theme.
+
+**Counting basis for "findings":** a finding is one numbered item raised at a HITL gate, at any severity (P1, P2, or minor). Where a round's items are counted differently below, it is stated.
+
+---
+
+## 1. The central finding
+
+**Rosetta's bootstrap explicitly names most of the failure modes that occurred anyway.**
+
+The always-on bootstrap loaded into every session of this project states: *"trust but verify"*, *"MUST NOT assume — even reasonably"*, *"coded != done, tests passing != actually works, confidence != evidence"*, *"existence != implementation != integration"*, and *"review = static inspection · validation = run it"*. These are accurate diagnoses. They were loaded into context for every turn of this project.
+
+They did not prevent the failures they describe. Across this project the orchestrator, with those instructions active:
+
+- reported documentation as updated when it had not been updated, at least five times (§4);
+- verified a design's citations and called it verified, while two false load-bearing claims sat unexamined (§4);
+- stated a bound confidently, corrected it wrongly, and corrected it wrongly again in the opposite direction before measuring (§4);
+- accepted "review = static inspection" as satisfied by nine rounds of reading, on a design whose most consequential defect was only reachable by running a command (§2).
+
+This is the finding most relevant to evaluating an *instruction layer specifically*, as distinct from evaluating a workflow or a set of documents: **naming a failure mode in an instruction does not prevent that failure mode.** The instructions here were correct, specific, and prominently placed. Compliance with them was self-assessed, and self-assessment is exactly the faculty the failures impaired.
+
+What did work was **structural** rather than instructional — gates that stop and wait for a human, reviewers who did not write what they review, and execution against a real system. Those are properties of the workflow's shape, not of the quality of its prose.
+
+## 2. What the workflow did, and what worked
+
+Four sessions: `init-workspace-flow` (9 phases, produced the docs set), one session with no workflow invoked (context load, language decision, data-model review), one `adhoc-flow` run (TypeScript/React scaffolding), and one `coding-flow` run (the walking skeleton — the only one reaching application code).
+
+`coding-flow`'s path for this feature: discovery (inline, as a disclosed deviation) → design (architect, opus) → **design HITL gate** → specs + plan → **plan review (reviewer subagent)** → **plan HITL gate** → four implementation batches (B0 solo, B1+B2 parallel, B3 integration) → **code review (reviewer subagent)**. Subagents were resumed by name rather than re-spawned, so their token figures are cumulative, not repeated work.
+
+**The HITL gate produced nearly all real defect-finding.** The design gate ran 9 rounds and surfaced 45 findings before any code existed; the plan gate rejected once more. Of those 45, the AI side raised 2 — both corrections of the orchestrator's own errors. The rest came from the human reviewer. The gate's *strict approval string* ("Yes, I reviewed the design") is the mechanism that kept it closed: nothing in the loop could advance on an ambiguous acknowledgement, so the work could not drift forward while review was still open.
+
+**Independent review found what authorship could not.** Every defect the AI side did catch came from an agent that had not written the artifact under review — the scaffold run's review passes found defects in files the orchestrator had edited minutes earlier; B3's execution validation found what B1's own author could not have found by reading. Ordinary engineering practice, but it held under repeated test here.
+
+**Execution found a defect class that no amount of reading could reach.** Once a real Postgres existed, the first genuine run of `npm run migrate` immediately exposed that the script lacked `node-pg-migrate`'s required positional `up` verb — it had silently printed help text and done nothing. That script had survived nine design rounds, two plan rounds, and a full server implementation, all of which verified the *path*, the *file extension*, and the *flag semantics* correctly. None had run it. **Some defects are unreachable by review at any depth.** This is the strongest argument in the project for `coding-flow`'s execution-based validation phase, and equally an argument that its document-heavy earlier phases cannot substitute for it.
+
+A **second instance** appeared at the very end, reinforcing the category. The client bundle intermittently built at 393 KB instead of 194 KB. Root cause: `NODE_ENV=development`, set in `.env` for the *server's* conventions, leaks into `vite build` and makes React emit its development bundle — no error, no warning, a build that reports success. It is triggered by precisely the workflow `.env.example` invites in its own first line ("Copy to .env for local work"). No document review could have found this; it is a property of the environment a command runs in, not of any file's contents. Fixed by pinning `NODE_ENV=production` in the build script and verified under the failing condition.
+
+**A phase that looked redundant found the largest gap in the project.** Phase 12 (`review_tests`) appeared skippable: 79 tests already existed, all passing, written during implementation per the plan's own test-scope section, and phase 8's code review had already examined them in passing. Running it anyway — because the workflow mandates it at MEDIUM — surfaced that **every single test driving a WebSocket connection used a `Pool` whose `connect()` never resolves.** The entire ADMIT→RELEASE sequence, the design's most-revised section and the site of a real defect caught during design review, had zero automated coverage. Neither prior gate could have found this: phase 8 asked "does the implementation satisfy the spec" (it did), and B3 asked "does the running system work" (it did). Only "are these tests any good" exposed that **correct code and regression-protected code are different properties**, and only one phase was looking at the second. This is the clearest evidence in the project that the workflow's phase separation carries real information — the lenses are not redundant even when the artifacts under them are the same.
+
+**Deviation disclosure worked consistently.** Subagents operating under `subagent-directives` disclosed design deviations rather than taking them silently, every time one occurred: extracting `validation.ts` to make a plan-named test file possible; using a `WeakMap` instead of the design's literal `ws.isAlive` property because the latter needs an unsound cast under this repo's strict config; unifying two queue budgets the design described separately, with reasoning; using key-absence where the design specified `| null`. Each was reported, argued, and individually assessable. This is one place where instruction content demonstrably shaped behavior.
+
+**Evidence-standard prompting produced genuine dissent — twice.** The architect disputed the orchestrator exactly twice and was right both times: a wrong heap-memory calculation (it measured), and a wrong claim about `pg`'s query-queueing (it read `pg-pool`'s source). Both times the instruction had specified *what would count as evidence*, not merely invited disagreement. Notably, it made the requested change anyway in one case — arguing the design should not rest on an emergent library-scheduling invariant even though the reported defect was unreachable.
+
+**Negative controls proved checks were real, twice, and cost almost nothing.** Two mechanisms in this project were confirmed by deliberately breaking something and watching the check fail: `noUncheckedIndexedAccess` (a deliberate unsafe index, rejected as expected) and the new connection-lifecycle test (the `client.release()` call was removed, the test failed, the file was restored byte-identically and it passed again). Both took under a minute. Set against §4's record of confident-but-wrong verification claims, this is the cheapest reliable technique the project found: **a check that has never been observed failing has not been shown to be a check.** It is not a Rosetta feature — the bootstrap's "trust but verify" gestures at it without prescribing it — but it is the practice that most consistently converted an assumption into evidence here.
+
+**Provenance tags and attached reasoning made contradictions stateable.** `[USER-DECIDED]` / `[AI-INFERRED]` markers and inline decision rationale did not *detect* anything on their own — the `7d`-vs-`30d` session-lifetime contradiction, for instance, was found by the human reviewer, not by the tag. What the tags provided was the ability to adjudicate a contradiction quickly once found, and to distinguish a user's decision from an agent's inference when deciding whether something could be changed. Useful, but downstream of detection, not a substitute for it.
+
+## 3. Efficiency and cost
+
+Subagent tokens only. Orchestrator/main-thread cost has never been measurable in this project — the counter resets each user turn — so every figure below **understates true cost by an uncounted amount**.
+
+| Phase | Subagent tokens | Rounds |
+|---|---|---|
+| `init-workspace-flow` | 345,434 | 9 phases |
+| `adhoc-flow` (scaffold + React) | 160,054 | 2 review passes |
+| Design (walking skeleton) | ~230,000 | 1 initial + 8 revisions |
+| Plan (authoring + phase-5 review) | 118,218+ (authoring rounds not fully totalled) | 3 authoring, 1 review |
+| Implementation (B0+B1+B2+B3) | 579,443 | 4 batches |
+| Code review (phase 8) | 195,560 | 1 pass, 6 findings |
+| Test review (phase 12) | 157,581 | 1 pass, 7 findings |
+
+**Walking skeleton total, design through test review: ~1,281,000 subagent tokens over four calendar days**, for a feature whose entire scope is "guest joins with a nickname, sends and receives messages in one room." That number is not yet comparable to anything.
+
+**Findings per design round: 8 → 7 → 6 → 5 → 4 → 1 → 3 → 5 → 6.** Round 9 was larger than rounds 6, 7 and 8, and its principal finding was an entirely uncovered category (steady-state backpressure and liveness), not a refinement. **No convergence trend was observed.** The decision to stop reviewing had to be made on the *kind* of finding still appearing, not on round count or a shrinking curve — and the honest reading is that round 10 would likely have found something too.
+
+**Roughly three-quarters of findings in rounds 5–8 were defects introduced by the previous round's fix**, not defects in the original design — 10 of the 13 items raised across those four rounds (77%). Traceable chains: round 4's ordered-batch fix created round 5's frame-type defect; round 4's byte cap created round 5's false aggregate bound; round 4's promise chain created round 5's cancellation gap; round 5's acquire-before-join reorder created round 6's lost-message window *and* round 7's ghost-socket defect; round 7's `GUARD-OPEN` created round 8's double-release. **Review cost does not decline linearly once fixes generate their own defects**, and nothing in the workflow surfaced this pattern — it was visible only by tracking finding provenance round-over-round by hand.
+
+**The cost profile inverted once a real system existed.** B3's end-to-end run — real server, two concurrent clients, hard kill and restart, direct database queries — found **zero** genuine code defects in B1 or B2, for 134,114 tokens and ~10 minutes. Phase 8's code review found 6 real items, but the three non-documentation ones (missing reset tool, unset body-size limit, test files shipped to `dist`) were **omissions against stated requirements, not incorrect code**. The design was expensive to get right in prose; once right, building and proving it was comparatively cheap. Return on review investment was concentrated almost entirely in design.
+
+## 4. Failure modes — mostly the orchestrator's, all under instructions that warned against them
+
+**Verification checked citations, not reasoning.** Before presenting the design for approval, the orchestrator verified two claims — both of the form "does this document quote its source correctly." Both were true. The two factual errors that survived into the first review round were of the form "does this conclusion follow": a nullable foreign key asserted to make malformed data impossible (it does not — `pg` maps `undefined` to `NULL` and the column accepts it), and an arithmetically wrong TOAST-threshold justification. Cheap mechanical checks were performed and reported as verification; the expensive semantic checks were not attempted. Recorded in `agents/MEMORY.md`.
+
+**A control added to catch fix-induced defects produced false assurance on first use.** After four consecutive rounds of fixes introducing defects, the orchestrator required a "what could this fix have broken — checked" section. It was produced. Its central claim — *"Checked for deadlock: none"* — was false, and the line disproving it sat 120 lines above in the same document. **A reflexive self-check is not self-verifying merely because it was mandated.** The question it asked ("did this introduce a problem?") is answerable from memory of intent; only a question that forces pointing at specific lines is not.
+
+**Documentation propagation failed at least five times, including immediately after a rule was written about it.** Instances: test-framework decision closed in `ASSUMPTIONS.md` but never moved to `DEPENDENCIES.md`, which that same entry named as its target; pool sizing recorded in two of the three files it belonged in; an IP-proxy remediation described to the user in prose and never written to `TODO.md`; a stale sentence left in the PLAN contradicting a decision inserted two sentences above it; and finally `ARCHITECTURE.md`, `CODEMAP.md` and `TECHSTACK.md` all still describing the feature as unbuilt after it was built — `CODEMAP.md` untouched across the entire design and implementation, despite containing its own written instruction to be re-derived once the skeleton landed. `agents/MEMORY.md` records the pattern twice; the second entry exists because the first rule did not fire, being scoped to "decisions" while the next instance was "a correction noticed in conversation."
+
+**Confident arithmetic, wrong twice, in opposite directions.** A buffer bound was justified as "far under" a threshold (wrong mechanism entirely), corrected to a figure later shown 2× low, then re-corrected 5.6× high, before measurement settled it. Each correction was delivered with more apparent confidence than the last. Self-correction did not converge on truth by iteration; direct measurement ended it.
+
+**An intermittent signal was dismissed as noise, twice, before being root-caused.** The 393 KB bundle first appeared during phase 8. The orchestrator retried the build twice, got the expected 194 KB both times, and reported to the user that it was "a transient anomaly, not a regression" — investigated and ruled out. It was neither transient nor ruled out: the retries had run in a shell without the leaked `NODE_ENV`, so they tested nothing about the actual variable. **Retrying an intermittent failure under the same ambient conditions is not a test of the hypothesis; it is the same coin landing heads twice.** The defect only got root-caused when it recurred with an identical content hash — repetition of the *exact same artifact* being the signal that "random noise" was the wrong model. Two clean retries had felt like evidence and were not.
+
+**Saying a file is wrong is not fixing it.** A `TODO.md` misfiling was identified aloud to the user, described as understood, and never edited — remaining wrong for three further review rounds until an external reviewer flagged it as still formally blocking the feature. `agents/MEMORY.md` contains a rule with almost that exact wording, written earlier in the same session.
+
+## 5. Workflow-level observations
+
+**Rosetta assumes tooling it does not verify.** The bootstrap mandates a `TodoWrite` task ledger ("MUST ALWAYS USE AND KEEP CURRENT TODO TASKS"). `TodoWrite` was unavailable in both sessions of this project. The fallback (a state file) worked, but was improvised each time rather than prescribed.
+
+**The workflows assume brownfield.** `init-workspace-flow`'s discovery and pattern-extraction phases have nothing to read in a greenfield repo; the pattern phase correctly refused to fabricate patterns rather than following its instructions literally — a judgment call the instructions did not supply. Every pattern in `docs/PATTERNS/` was consequently *prescribed*, not extracted. All five were later rewritten once (the TypeScript/ESM conversion during the scaffold run), and two — `jwt-session-cookies.md` and `parameterized-pg-queries.md` — required a further 10 corrections against real requirements before implementation could safely copy them. One of those corrections (`getMessagesForRoom` typed `Pool` rather than `Pool | PoolClient`) would have propagated a resource-inversion defect into every future feature that used the template.
+
+**Workflow selection is unguarded.** Rosetta exposes ~18 workflows with adjacent names. `code-analysis-flow` — a reverse-engineering workflow — was invoked against a repo containing three stub files and no application code. Nothing in the workflow checks its own preconditions; executing it as instructed would have produced a fabricated "analysis" of code that did not exist. Stopping required judgment, not a guard.
+
+**Sizing does not resolve boundary cases.** File-count heuristics placed this feature at the MEDIUM/LARGE boundary (~16–18 files, three areas). MEDIUM was chosen deliberately, to get every review gate without LARGE's mandatory full delegation. Defensible, but a judgment recorded as such — not an output of the rule.
+
+## 6. What this does and does not show
+
+**Shows.** A workflow with mandatory stop-and-wait gates, independent-reviewer requirements, and *separated review lenses* (implementation-vs-spec, execution, test-quality) produced a large volume of real defect-finding — and the phase-separation itself carried information: the mandatory test-review phase, which looked redundant against already-passing tests, found the project's largest coverage gap — *conditional on the human engaging rather than rubber-stamping*. The AI review chain caught a small minority of design-phase defects and effectively all execution-phase ones, a split tracking whether a defect was reachable by reading or only by running. Structural properties (gates, reviewer independence, real execution) carried the workflow; instruction prose did not prevent the failures it named.
+
+**Does not show.** That any of this is faster, cheaper, or more reliable than an unstructured session — no such comparison has been run, and speculation about what an unstructured session "would have" done is not evidence. That the AI review chain substitutes for human review; in the design phase here it did not. That the ~73% fix-induced-defect rate generalizes — this feature's surface (WebSocket lifecycle, connection pooling, concurrent initialization) is unusually concurrency-heavy, and a CRUD feature might behave entirely differently. Anything about Rosetta's brownfield "2× productivity" claim, which this greenfield project is structurally unable to test (`docs/CONTEXT.md`, "Evaluation guardrails").
+
+## 7. Open for the final write-up
+
+- The no-Rosetta DM baseline is the only artifact that converts any of this into a comparison. No cost figure here should be presented as "Rosetta costs X" without it.
+- Whether a 45-finding, 9-round design gate recurs on a second feature is unknown at a sample size of one.
+- Orchestrator token cost remains unmeasured; all totals are subagent-only and understate the true figure.
+- Every number in this document derives from subagent completion reports and the session record. They have not been independently re-derived from an external accounting source. One subagent's own summary miscounted its own findings table (reported "6 findings" above a 7-row table) — a reminder that self-reported counts, including those feeding this document, warrant the same scepticism as any other self-assessment.
+- Two coverage gaps remain open and disclosed rather than closed: the heartbeat/liveness mechanism (`startHeartbeat`) has no automated test, and the `23503` foreign-key path in `handleSend` is untested. Both were judged to need fixtures whose correctness could not be established quickly enough to be worth rushing. They are recorded here so their absence is a decision rather than an oversight.
+- Phase 13 (`final_validation`) has not run. The feature is not committed.

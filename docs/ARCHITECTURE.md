@@ -4,7 +4,7 @@ Architecture and technical requirements: modules, structure, data model, runtime
 No business context — see `docs/CONTEXT.md`. File layout — see `docs/CODEMAP.md`. Versions and packages — `docs/TECHSTACK.md`, `docs/DEPENDENCIES.md`. Coding conventions — `docs/PATTERNS/INDEX.md`.
 Style: terse, decision-first, each decision carries its reason so it is not silently reverted.
 
-**Nothing here is built.** All of it is decided-and-unbuilt. Provenance: **[USER-DECIDED]** = from `POC-BRIEF.md` or the user this session. **[AI-INFERRED]** = derived by an agent, unverified.
+**The walking skeleton is built** (guest join, single-room chat, WebSocket fan-out, persisted to Postgres — `agents/IMPLEMENTATION.md`, 2026-09-08). Everything else described here — moderation, presence, multi-room, registration/login, rate limiting — remains decided-and-unbuilt. Provenance: **[USER-DECIDED]** = from `POC-BRIEF.md` or the user this session. **[AI-INFERRED]** = derived by an agent, unverified.
 
 ## Shape
 
@@ -28,7 +28,7 @@ One process. One host. One database. No queue, no cache tier, no pub/sub, no CDN
 
 ## Modules
 
-**[AI-INFERRED — decomposition is an agent proposal; endorsed by `docs/CODEMAP.md` but unbuilt]**
+**[AI-INFERRED — decomposition is an agent proposal, endorsed by `docs/CODEMAP.md`. Built for the walking skeleton's scope (`server/http`, `server/ws`, `server/session`, `server/rooms`, `db`, `client`); `server/moderation` remains unbuilt.]**
 
 | Module | Responsibility |
 |---|---|
@@ -41,6 +41,14 @@ One process. One host. One database. No queue, no cache tier, no pub/sub, no CDN
 | `client` | **React 19 SPA, built by Vite to `dist/client`**, served as static assets by `server/http`. WebSocket client. **[USER-DECIDED — 2026-09-04, departs from the pre-Rosetta design]** |
 
 Boundary rule: `rooms` is process-local and volatile; `db` is durable. Nothing in `rooms` may be the only copy of anything that matters after a restart.
+
+### Database connection pool
+
+**[USER-DECIDED — 2026-09-05, extended 2026-09-07]** `max: 10`, `idleTimeoutMillis: 30_000`, `connectionTimeoutMillis: 5_000`, `statement_timeout: 5_000`, `query_timeout: 7_000`.
+
+The two timeouts were ratified 2026-09-07. `statement_timeout` is sent in the startup packet and is a genuine **server-side cancel**, so a timed-out query actually stops and its connection returns to the pool clean. `query_timeout` is a strictly-higher client-side backstop for the case no server-side timeout can help — a dead or stalled connection — and only that path releases with an error so the pool destroys the connection. Without these, `pg`'s `query_timeout` alone rejects the promise without cancelling, leaving a still-busy connection to be re-lent.
+
+Each pooled connection is a Postgres backend process competing for the same 1 GB as Node and Caddy, so this cap is a memory bound, not a throughput target. Raising it trades directly against the capacity ceiling below, which has never been measured.
 
 ### Client build
 

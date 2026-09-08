@@ -36,7 +36,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Lint
         run: npm run lint
@@ -56,7 +56,9 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_USER: rosetta
-          POSTGRES_PASSWORD: rosetta
+          # Generated per run - a disposable container reachable only from this
+          # runner, so no credential literal belongs in this file.
+          POSTGRES_PASSWORD: ${{ github.run_id }}
           POSTGRES_DB: rosetta_poc
         ports:
           - 5432:5432
@@ -68,8 +70,8 @@ jobs:
 
     env:
       # loadConfig() fails fast on all four (src/server/config.ts).
-      DATABASE_URL: postgres://rosetta:rosetta@localhost:5432/rosetta_poc
-      TEST_DATABASE_URL: postgres://rosetta:rosetta@localhost:5432/rosetta_poc_test
+      DATABASE_URL: postgres://rosetta:${{ github.run_id }}@localhost:5432/rosetta_poc
+      TEST_DATABASE_URL: postgres://rosetta:${{ github.run_id }}@localhost:5432/rosetta_poc_test
       JWT_SECRET: ci-only-not-a-real-secret-ci-only-not-a-real-secret
       PORT: '3000'
       ALLOWED_ORIGIN: http://localhost:5173
@@ -83,7 +85,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # docker/postgres-init/ runs only under Docker Compose, not for a
       # service container, so the _test database is created explicitly here.
@@ -92,7 +94,7 @@ jobs:
         run: psql "$DATABASE_URL" -c 'CREATE DATABASE rosetta_poc_test'
 
       - name: Migrate the test database
-        run: npx node-pg-migrate up -m src/db/migrations -d TEST_DATABASE_URL
+        run: ./node_modules/.bin/node-pg-migrate up -m src/db/migrations -d TEST_DATABASE_URL
 
       - name: Test
         run: npm test
@@ -109,7 +111,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build server and client
         run: npm run build

@@ -43,6 +43,22 @@ Five workflows:
 
 **Known incomplete:** the Claude GitHub App is not installed, so both Claude jobs fail with `Claude Code is not installed on this repository` until `/install-github-app` is run. Neither is a required status check, so this cannot block a merge (`docs/TODO.md`).
 
+**Validated by deliberate failure, not by a green run** (2026-09-08, throwaway PR #5, since closed and its branch deleted). A passing check is equally consistent with the check not running, so each one was made to fail on purpose (`agents/MEMORY.md`, *Prove a config is doing work by making it fail on purpose*):
+
+| Injected defect | Check | Result |
+|---|---|---|
+| Unused variable | Lint step | failed |
+| `const answer: number = 'forty-two'` | Typecheck step, and Build | both failed |
+| `assert.equal(1, 2)` | Tests (PostgreSQL 17) | failed |
+| Invalid SQL in a third migration | Tests, at the *Migrate the test database* step | failed — the step is load-bearing, not decorative |
+| Request input concatenated into SQL | CodeQL | `js/sql-injection`, high, correct line |
+| `lodash` pinned to 4.17.15 | Dependency review | failed on 3 high advisories |
+| (draft PR) | Claude review | skipped — the draft guard works |
+
+Dependency review and CodeQL both returned to green when the defects were removed, so the failures track the diff rather than being constant noise. Evidence from the real run on the PR head: test database created, both migrations applied, **83 tests / 83 pass / 0 skipped**, client artifact `index.html` + one hashed 196 KB bundle, CodeQL 201 rules.
+
+**Known gap found during validation:** on `pull_request` events `github.sha` is the ephemeral merge commit, so the client artifact is named after a commit absent from the branch history. A deploy job that looks it up by head SHA will not find it. Logged in `docs/TODO.md`.
+
 **Branch protection** on `docs/data-model-approval` requires *Lint and typecheck*, *Tests (PostgreSQL 17)*, *Build* and *Analyze (javascript-typescript)*. Admins are exempt and no approving review is required — this is a solo repository, and a required approval would make every PR unmergeable.
 
 ### Walking skeleton implemented and end-to-end verified: complete, 2026-09-08

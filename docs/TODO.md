@@ -20,6 +20,10 @@ The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencie
 
 **Half done, 2026-09-08.** `.github/workflows/ci.yml` builds the client and uploads `dist/client` as an artifact. **Nothing consumes that artifact** — no deploy workflow exists, so the remaining half is a CD job that downloads it onto the droplet.
 
+### P1 — with the deploy job — name the client artifact by the head SHA — `.github/workflows/ci.yml`
+
+On `pull_request` events `github.sha` is the ephemeral merge commit, so the artifact uploaded by the build job is `client-<merge sha>` — a commit that exists in no branch. Found by validation 2026-09-08. Harmless today because nothing consumes the artifact; it becomes a silent lookup failure the moment a deploy job resolves it by head SHA. Use `github.event.pull_request.head.sha || github.sha`.
+
 ### P1 — before the AI review is useful — add the `CLAUDE_CODE_OAUTH_TOKEN` secret — repository settings
 
 `.github/workflows/claude-code-review.yml` and `claude.yml` both fail on every PR until Claude has credentials. Observed on PR #3: `Claude Code is not installed on this repository`. Fix by running `/install-github-app` in an interactive Claude Code session — it installs the GitHub App and adds the `CLAUDE_CODE_OAUTH_TOKEN` secret the workflows reference. Deliberately **not** a required status check, so this cannot block a merge.

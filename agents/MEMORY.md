@@ -84,6 +84,13 @@ Keep template entries so that AI knows how to fill them in later on.
 - The second is the more valuable behaviour: it neither complied silently nor used being right as grounds to refuse the change.
 - Generalizes: "push back with evidence" produces useful dissent only when the subagent is also told the standard of evidence. Both pushbacks cited a file and line or a measurement, because that was demanded. A bare instruction to "disagree if you disagree" would not have produced either.
 
+### Breaking CI on a throwaway PR settled in two runs what a green run could not settle at all [ACTIVE]
+
+- The CI added 2026-09-08 was green on its own PR. That is equally consistent with the checks working and with them checking nothing — CodeQL in particular reported `results=0` across 201 rules.
+- Six deliberate defects on a scratch branch (unused variable, type error, failing assertion, invalid migration SQL, a SQL-injection sink, a dependency with a known high advisory) made each check fail at the exact step intended, and removing them returned CodeQL and dependency review to green — proving the checks track the diff rather than emitting constant noise.
+- Cost: one scratch branch, two CI runs, deleted afterwards. The PR under review kept a clean history.
+- Rule: validate a new gate by making it fail, on a branch you throw away. Applies to CI, lint configs, alerting and health checks alike.
+
 ### \<Generalized What Worked\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]

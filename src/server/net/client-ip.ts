@@ -49,12 +49,20 @@ function logFirstResolution(source: 'xff' | 'peer'): void {
 }
 
 /** Picks the rightmost comma-separated value out of a raw `X-Forwarded-For`
- * value. Node's http headers surface a repeated header as `string[]`; each
- * element can itself carry a comma-joined chain, so every element is
- * joined before splitting rather than only inspecting the last array
- * entry. The rightmost value overall is the one nearest the trusted
- * proxy — the leftmost is attacker-controlled
- * (architecture-notes §1.4, §1.6). */
+ * value. The rightmost value is the one nearest the trusted proxy — the
+ * leftmost is attacker-controlled (architecture-notes §1.4, §1.6).
+ *
+ * On the array branch: Node does **not** produce an array for this header.
+ * Repeated `X-Forwarded-For` headers are joined by Node's own parser into a
+ * single comma-separated string ("1.2.3.4, 9.9.9.9"); `set-cookie` is the
+ * only header Node keeps as an array. Verified directly against a live
+ * `http.Server` — code review 2026-09-09, after an earlier version of this
+ * comment asserted the opposite from reading the TypeScript type rather
+ * than testing the runtime. The branch is kept because
+ * `IncomingHttpHeaders` is typed `string | string[] | undefined` for every
+ * header, so the type must be handled even though this shape is
+ * unreachable here. It is type satisfaction, not defence against a real
+ * input. */
 function lastForwardedValue(forwardedFor: string | readonly string[]): string {
   const combined: string = Array.isArray(forwardedFor)
     ? (forwardedFor as readonly string[]).join(',')

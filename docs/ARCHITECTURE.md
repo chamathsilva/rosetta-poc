@@ -4,7 +4,7 @@ Architecture and technical requirements: modules, structure, data model, runtime
 No business context — see `docs/CONTEXT.md`. File layout — see `docs/CODEMAP.md`. Versions and packages — `docs/TECHSTACK.md`, `docs/DEPENDENCIES.md`. Coding conventions — `docs/PATTERNS/INDEX.md`.
 Style: terse, decision-first, each decision carries its reason so it is not silently reverted.
 
-**The walking skeleton is built** (guest join, single-room chat, WebSocket fan-out, persisted to Postgres — `agents/IMPLEMENTATION.md`, 2026-09-08). Everything else described here — moderation, presence, multi-room, registration/login, rate limiting — remains decided-and-unbuilt. Provenance: **[USER-DECIDED]** = from `POC-BRIEF.md` or the user this session. **[AI-INFERRED]** = derived by an agent, unverified.
+**The walking skeleton is built** (guest join, single-room chat, WebSocket fan-out, persisted to Postgres — `agents/IMPLEMENTATION.md`, 2026-09-08). **The gated-deploy code is also built** (trusted-proxy IP extraction, loopback bind, Caddy gate, systemd units, retention sweep, deploy workflow — `agents/IMPLEMENTATION.md`, 2026-09-08) but **nothing has been run on a real host**: no droplet is provisioned, so every deployment claim below is proven locally or by inspection only, never on infrastructure. Everything else described here — moderation, presence, multi-room, registration/login, rate limiting — remains decided-and-unbuilt. Provenance: **[USER-DECIDED]** = from `POC-BRIEF.md` or the user this session. **[AI-INFERRED]** = derived by an agent, unverified.
 
 ## Shape
 
@@ -32,7 +32,7 @@ One process. One host. One database. No queue, no cache tier, no pub/sub, no CDN
 
 | Module | Responsibility |
 |---|---|
-| `server/http` | Static client, REST endpoints (join, register, login, report), health check |
+| `server/http` | Static client, REST endpoints (join, register, login, report). **No `/healthz` exists yet** — the gated-deploy workflow instead polls the static root path as a liveness stand-in (see "Release layout and rollback" below). |
 | `server/ws` | WebSocket upgrade, message routing, room fan-out, presence |
 | `server/session` | JWT issue/verify, guest→registered upgrade |
 | `server/rooms` | In-process `Map<roomId, Set<socket>>` — membership, broadcast, presence roster |
@@ -219,6 +219,41 @@ internet → Caddy (:443, auto TLS, basic auth gate) → Node process (:3000, HT
 - **Pre-moderation gate: Caddy basic auth**, enforced in the reverse proxy, above the application — no application code implements it. Removing it at public launch is a Caddy config change, not a code change. **[USER-DECIDED]**
 - Secrets via systemd `EnvironmentFile`, read as `process.env`, fail-fast on missing required vars. See `docs/PATTERNS/env-config-secrets.md`.
 - Not provisioned yet. Do not provision before the walking skeleton is ready to deploy.
+
+### Trusted-proxy client IP
+
+**[USER-DECIDED — 2026-09-08, closes REQ-MOD-003]** `messages.ip` (and, once `bans` exists, `bans.ip`) must record the real client, not Caddy's own address. `src/server/net/client-ip.ts` trusts `X-Forwarded-For` **only** when the immediate TCP peer is one of `127.0.0.1`, `::1`, `::ffff:127.0.0.1` — the mapped IPv4 form is mandatory, not defensive padding: a dual-stack Node listener reports loopback IPv4 peers exactly that way, and omitting it silently disables the whole extractor. The trusted set is a **constant in code, not an env var** — Caddy and Node are co-located on one droplet by decision, so "the proxy is loopback" is itself a decision (`docs/PATTERNS/env-config-secrets.md`). Wired into the WebSocket upgrade path at `src/server/ws/upgrade.ts:96`, the only site that captures an IP today.
+
+Caddy **replaces**, not appends, the header (`header_up X-Forwarded-For {http.request.remote.host}` in `deploy/Caddyfile`), so the chain carries exactly one value; the extractor still parses the rightmost comma-separated value anyway, as defence against that line ever being removed. A value that fails `net.isIP()` is never passed to `messages.ip` (an `inet` column that throws `22P02` on a malformed string, inside the send path) — it falls back to the real peer address, never to an untrusted or malformed header value.
+
+`app.set('trust proxy', ...)` is deliberately **not** added. No HTTP handler reads `req.ip` today (`POST /api/join`, `GET /api/session` do not), and a second trust mechanism that nothing consumes is a trap for the next handler that reaches for it by reflex instead of the extractor — the two paths would then risk recording different IPs for the same client.
+
+### Bind and firewall — two controls, neither redundant
+
+**[USER-DECIDED — 2026-09-08]** `src/server/index.ts` binds `127.0.0.1` only; `ufw` default-denies inbound except 22/80/443. Both exist because they defend against different failures:
+
+| Control | Defends against | Does not defend against |
+|---|---|---|
+| Loopback bind | The entire internet reaching `:3000`, **even if the firewall is off, flushed by a package upgrade, or never enabled** — the control that survives a firewall mistake, at zero cost since Caddy is same-host. | Every other port; a local process. |
+| `ufw` default-deny | Every port nobody thought about — Postgres 5432, anything a future `apt install` opens, anything started by hand and forgotten. | `:3000` specifically, if `ufw` is ever disabled or reset. |
+
+Neither defends against a **compromised local process** connecting to `127.0.0.1:3000` with a forged `X-Forwarded-For` — that is exactly why the trusted-proxy check above is a code-level peer check, not an appeal to network topology.
+
+### Release layout and rollback
+
+**[USER-DECIDED — 2026-09-08]** The deploy workflow (`.github/workflows/deploy.yml`, `workflow_dispatch`-only — nothing reaches the host unless a human presses the button) builds server and client **on the GitHub Actions runner**, never on the droplet, and ships a self-contained release to `/srv/chat/releases/<utc-timestamp>-<short-sha>/` (production `node_modules`, compiled `dist/`, migration SQL, a release-scoped `deploy.env`) over SSH as the unprivileged `deploy` user. `/srv/chat/current` symlinks to one release; the flip is atomic (`ln -sfn` onto a temp name, then `mv -T` — a single rename syscall, unlike `ln -sfn` directly onto the live link, which is not atomic and can leave no `current` at all for an instant). The last 3 releases are kept.
+
+**Deploy order**: bcrypt smoke test on the new release (proves the native module loads on this host's glibc before anything is touched) → stop `chat` → flip `current` → run `chat-migrate.service` (a separate oneshot unit, migrations before restart — **[S]**) → start `chat` → poll a loopback health check (`GET /` — see the `server/http` module note above, since no `/healthz` exists) for up to ~62s → external assertion that `https://<SITE_DOMAIN>/` returns `401` through the gate. A failure at migrate/start/health auto-flips `current` back to the previous release and restarts it — **and the workflow still reports red**, so a silent auto-rollback never hides a broken release. **Rollback never runs a `down` migration**: an automated schema rollback can drop a column holding rows written seconds earlier, so the schema is left forward and only the code rolls back. Consequence: each migration must stay compatible with the immediately-previous release for the duration of one deploy — a much narrower ask than full expand/contract discipline. On the **first** deploy there is no previous release to flip back to; a failure there stops the service and leaves the site down rather than guessing at a rollback target.
+
+Two systemd identities, not one: `rosetta-chat` (nologin, no shell, no sudo, no writable path) runs the service and is the identity an attacker gets by exploiting the application; `deploy` (key-only SSH, sudoers-allowlisted to exactly `systemctl stop chat` / `systemctl start chat` / `systemctl start chat-migrate` / `systemctl is-active chat` — no wildcard) runs the deploy and cannot read `/etc/rosetta-chat/secrets.env`. A single shared user would make the CI deploy key also, directly, the key to the secrets file.
+
+### Data retention task
+
+**[USER-DECIDED — 2026-09-08, added at the design gate because this deploy is what first writes real IPs into `messages.ip`]** A systemd timer (`OnCalendar=daily`, `Persistent=true` — a missed run fires at next boot rather than being silently skipped) runs a oneshot unit that invokes `src/db/retention.ts`, one transaction, three statements in fixed order: `messages.ip → NULL` past 30 days; `bans.ip → NULL` past 30 days after `expires_at`; guest `users` rows deleted past `GUEST_TTL_MS` (24h) since `last_seen_at`, `author_id` on their messages going to NULL via `ON DELETE SET NULL` while `author_nickname` survives. One transaction because a partially-applied run would report success while only half-keeping the promise.
+
+**Statement 2 is guarded on `bans` existing** (`to_regclass('bans') IS NULL` → skip, `bansIpNulled: null`, logged) — `bans` has no migration yet. Landing statement 2 unguarded against a database without that table would abort the **whole** transaction on the missing relation, rolling statement 1 back with it, so `messages.ip` would never be erased — silently, permanently, while the job reported success. Wiring the guard out once `bans` exists is tracked in `docs/TODO.md`.
+
+Daily granularity on a 30-day rule means worst-case retention is **≤31 days**, accepted **[S — 2026-09-08]** as satisfying this file's 30-day promise. The unit is host-scoped (installed once) but its `ExecStart` targets the release-scoped `/srv/chat/current` symlink with no arguments, so a release can change retention logic without a host edit; rolling back below the release that introduced this script makes the unit fail loudly (visible in `systemctl list-timers`) rather than silently doing nothing.
 
 ### Domain
 

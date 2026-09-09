@@ -16,7 +16,7 @@ Versions below are **INSTALLED** as of 2026-09-04 and resolved from `package-loc
 | `ws` | WebSocket support | 8.21.3 | INSTALLED |
 | `pg` | PostgreSQL client | 8.23.0 | INSTALLED |
 | `jsonwebtoken` | JWT signing/verification for session cookies | 9.0.3 | INSTALLED |
-| `bcrypt` | Password hashing, cost factor 12 **[USER-DECIDED]**. Native module; ships a prebuilt binary, so it loads even though npm 11 blocks install scripts by default. Verified working at cost 12 on darwin-arm64 — **not yet verified on the droplet's architecture** | 6.0.0 | INSTALLED |
+| `bcrypt` | Password hashing, cost factor 12 **[USER-DECIDED]**. Native module. **Corrected 2026-09-08**: `bcrypt@6.0.0` dropped `node-pre-gyp` for `prebuildify` — prebuilt binaries (including `linux-x64/bcrypt.glibc.node`, matching an Ubuntu 24.04 droplet) ship **inside the package tarball**; no install script runs for it on any platform, and the earlier "npm 11 blocks install scripts" premise is also itself wrong (that is npm v12). `.github/workflows/deploy.yml` now smoke-tests `require('bcrypt').hashSync(...)` on the new release before every deploy. Verified working at cost 12 on darwin-arm64 — **still not run on the real droplet, because none is provisioned [HOST]** | 6.0.0 | INSTALLED |
 | `node-pg-migrate` | Database migrations **[USER-DECIDED — 2026-09-04]**. Production, not dev: the droplet runs migrations at deploy, so `npm ci --omit=dev` must still contain it | 8.0.4 | INSTALLED |
 | `cookie-parser` | Cookie parsing middleware for Express | 1.4.7 | INSTALLED |
 

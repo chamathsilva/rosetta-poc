@@ -16,10 +16,36 @@ Style: baseline first, then one h3 per change with date and a one-line descripti
 
 ## Major Implemented Workstreams
 
+- **Gated-deploy code** (2026-09-09): trusted-proxy client-IP extraction, loopback bind, data-retention sweep, Caddy gate + systemd units, `workflow_dispatch` deploy workflow. `src/server/net/`, `src/db/retention.ts`, `deploy/`, `.github/workflows/deploy.yml`. **Code only — no droplet exists, nothing has been run on a host.** See changelog entry below.
 - **CI and automated code review** (2026-09-08): five GitHub Actions workflows — quality gate with a real PostgreSQL 17, Claude PR review, `@claude` on demand, CodeQL, dependency review. `.github/workflows/`.
 - **Walking skeleton** (2026-09-08): guest nickname join, single-room chat, WebSocket fan-out, persisted to Postgres. First application code in the project. `src/db/`, `src/server/`, `src/client/`, `src/shared/`. See changelog entry below for the full account.
 
 ## Change log
+
+### Gated-deploy: code complete (B1–B5, B7), host execution pending (B6, B8), 2026-09-09
+
+**Scope**: the first real deployment of the walking skeleton, gated behind Caddy basic auth. `plans/gated-deploy/` (architecture-notes, SPECS, PLAN). This entry covers B1–B5 (code) and B7 (documentation); B6 (runbook) is a separate deliverable and B8 (owner provisions + executes) has not happened — **nothing in this entry has run against a real host.**
+
+**Shipped**:
+- `src/server/net/client-ip.ts` — trusted-proxy `X-Forwarded-For` extractor, trusts only a loopback immediate peer (`127.0.0.1`/`::1`/`::ffff:127.0.0.1`), rightmost-value parsing, falls back to the real peer on any untrusted or malformed input. 22 tests; trust rule proven by deliberate inversion (leftmost-instead-of-rightmost and trust-everyone each produce 5 named test failures, then restored).
+- `src/server/ws/upgrade.ts` — wired to the extractor at the one site that captures an IP today; `src/server/index.ts` binds `127.0.0.1` only, closing the previously-undocumented all-interfaces bind gap.
+- `src/db/retention.ts` — one-transaction, three-statement daily sweep (`messages.ip`→NULL 30d, `bans.ip`→NULL 30d past guarded existence check, guest reap 24h = `GUEST_TTL_MS`). CLI entry calls `pool.end()` so the oneshot unit exits promptly.
+- `deploy/Caddyfile`, `deploy/systemd/{chat,chat-migrate,rosetta-chat-retention.service,rosetta-chat-retention.timer}` — reverse proxy + basic-auth gate (deletable in one block at public launch), release/symlink-aware units, hardening that deliberately omits `MemoryDenyWriteExecute` (breaks V8's JIT) and `SystemCallFilter` (unvalidatable without the real host).
+- `.github/workflows/deploy.yml` — `workflow_dispatch`-only, builds on `ubuntu-24.04` (pinned, not `ubuntu-latest`, to match the droplet's glibc), refuses to deploy a commit whose CI is not green, ships a self-contained release over SSH, stop→flip→migrate→start→health→external-gate-assertion, auto-rollback (never a `down` migration) on failure at migrate/start/health, explicit first-deploy branch with no rollback target.
+
+**`docs/TODO.md` items this closed**: ship-the-client-to-the-droplet (closed differently than planned — the deploy workflow rebuilds rather than consuming CI's artifact, `docs/ARCHITECTURE.md` "Release layout and rollback"); remove-the-scaffold-stubs (stale — `src/server/index.ts` and `src/client/main.tsx` are both real, not stubs, confirmed by reading both files); trust-the-proxy-for-client-IPs (code side only — `docs/TODO.md` still marks the end-to-end host proof open); implement-the-launch-gate (code side only, same caveat); the CSP header item (**it was already done** — `src/server/http/app.ts:20-23` sets a full policy with no `'unsafe-inline'`, verified by reading the file directly, not taken on the plan's word — the TODO entry simply never noticed and would have stayed open indefinitely).
+
+**`docs/TODO.md` item this only partially closed**: the one scheduled maintenance task. Two of its three statements now run for real (`messages.ip` erasure, guest reap); the third (`bans.ip` erasure) is a guarded no-op — `bans` has no migration, and landing the statement unguarded would abort the whole transaction on the missing relation, permanently erasing nothing while the job reported success. A new TODO item tracks removing the guard once `bans` exists, so the gap does not become permanent by being forgotten.
+
+**Rationale corrections applied, not just re-filed**: the bcrypt TODO item's two-count-wrong justification (npm-version claim, prebuilt-binary claim) was rewritten — `bcrypt@6.0.0` ships `prebuildify` binaries inside its own tarball, needing no install script on any platform; the action item survives because the real droplet has still never run it. The artifact-naming TODO item (`ci.yml` client artifact named by `github.sha`) was downgraded P1→P2 and its justification rewritten: under this design nothing ever looks the artifact up programmatically, so the original "silent lookup failure" framing is false; it survives as a human-readability concern and the one-line fix (`github.event.pull_request.head.sha || github.sha`) landed in `.github/workflows/ci.yml:123`.
+
+**A defect an independent plan review caught before any of this shipped**: the retention task's original design ran all three statements unconditionally in one transaction. `bans` does not exist yet, and Postgres aborts an entire transaction on a reference to a missing relation — so the very first scheduled run would have reported success while erasing zero IPs, forever, exactly the privacy promise the task exists to keep. Three authoring passes (architect, plan author, plan revision) wrote past this before a reviewer caught it by reading the migration file directly rather than the spec's description of it. Resolved by a user-approved guard (skip statement 2, report the skip distinctly from "ran, found nothing") rather than by adding the missing migration. See `agents/MEMORY.md` for the generalized rule this produced.
+
+**Known coupling recorded, found by B5**: `.github/workflows/deploy.yml`'s CI-precondition step matches `ci.yml`'s job names verbatim — `Lint and typecheck`, `Tests (PostgreSQL 17)`, `Build`. Those same three strings are this repository's branch-protection required status checks. Renaming a CI job therefore silently breaks the deploy gate and the merge gate at once; the coupling is called out in `deploy.yml`'s own comment at the precondition step for anyone renaming a job later.
+
+**Not done in this pass, deliberately out of scope**: `docs/RUNBOOK-gated-deploy.md` (B6, a separate exclusively-owned deliverable); anything requiring a provisioned droplet (B8) — `docs/ASSUMPTIONS.md`'s PostgreSQL-major-version and real-cost entries stay `[OPEN]`; two corrections named by the design (reconciling `plans/gated-deploy/architecture-notes.md` with the plan-review's three superseding findings, and a "six tests"→"seven" fix inside `plans/gated-deploy/architecture-notes.md` and `agents/TEMP/gated-deploy/discovery-notes.md`) — both fall inside `plans/**` and `agents/TEMP/**`, which this batch's file ownership excludes; flagged back to the orchestrator rather than actioned.
+
+Built WITH Rosetta.
 
 ### CI and automated code review on GitHub Actions: complete, 2026-09-08
 

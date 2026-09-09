@@ -14,15 +14,11 @@ Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Requir
 
 ## Blocking deployment (gated)
 
-### P0 — before gated deploy — ship the CI-built client to the droplet — `.github/workflows/`
-
-The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. Without a shipped build the deploy produces a server with no UI, and nothing fails loudly.
-
-**Half done, 2026-09-08.** `.github/workflows/ci.yml` builds the client and uploads `dist/client` as an artifact. **Nothing consumes that artifact** — no deploy workflow exists, so the remaining half is a CD job that downloads it onto the droplet.
-
 ### P1 — with the deploy job — name the client artifact by the head SHA — `.github/workflows/ci.yml`
 
-On `pull_request` events `github.sha` is the ephemeral merge commit, so the artifact uploaded by the build job is `client-<merge sha>` — a commit that exists in no branch. Found by validation 2026-09-08. Harmless today because nothing consumes the artifact; it becomes a silent lookup failure the moment a deploy job resolves it by head SHA. Use `github.event.pull_request.head.sha || github.sha`.
+On `pull_request` events `github.sha` is the ephemeral merge commit, so the artifact uploaded by the build job is `client-<merge sha>` — a commit that exists in no branch.
+
+**Reprioritized 2026-09-08 (gated-deploy design), P1 → P2, and the justification rewritten, not merely re-ordered.** The gated-deploy workflow (`.github/workflows/deploy.yml`) does not consume CI's artifact at all — it rebuilds on its own runner (`plans/gated-deploy/architecture-notes.md` §3.1–§3.2), so this defect cannot cause a deploy lookup failure; that was the original justification and it is now false. The item survives for a different, smaller reason: CI's artifact remains the human-facing record of "what did this PR build," and naming it after a commit that exists in no branch is misleading to a person reading the Actions UI, not to a machine. Fix: `client-${{ github.event.pull_request.head.sha || github.sha }}`.
 
 ### P1 — on the first PR after this merges — prove the AI reviewer actually reviews — `.github/workflows/claude-code-review.yml`
 
@@ -32,25 +28,21 @@ On `pull_request` events `github.sha` is the ephemeral merge commit, so the arti
 
 The vendor-generated workflows were kept over guarded alternatives **[USER-DECIDED — 2026-09-08]**. Consequence on a **public** repository: a pull request from a stranger's fork triggers them, and GitHub withholds secrets from fork runs, so the checks fail on every outside contribution. Draft PRs are also reviewed, which spends tokens on unfinished work. Neither is a required check, so neither blocks a merge. Revisit if outside PRs ever arrive.
 
-### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
-
-`src/server/index.ts` and `src/client/main.tsx` are build-verification stubs with no product behaviour. `src/server/index.ts` throws if called. They exist to prove the build pipeline end to end and must be replaced, not extended.
-
 ### P1 — before gated deploy — verify `bcrypt` loads on the droplet — `docs/DEPENDENCIES.md`
 
-`bcrypt` is a native module. npm 11 blocks install scripts by default, so it works locally only because the package ships a prebuilt binary for darwin-arm64. If no prebuild matches the droplet's architecture, `npm ci` succeeds and the server then fails at first import. Verify before relying on the deploy, or approve the install script explicitly.
+**Rationale corrected 2026-09-08 (gated-deploy plan review); the action item survives, the reasoning it used to carry does not.** The previous wording asserted two things, both wrong: that npm 11 blocks install scripts by default (it is npm v12 that will; npm 11.16+ only warns — `agents/TEMP/gated-deploy/discovery-notes.md` §6), and that `bcrypt` depends on a prebuilt binary happening to exist for the target architecture (`bcrypt@6.0.0`, the version pinned here, dropped `node-pre-gyp` for `prebuildify` and ships prebuilt binaries — including `linux-x64/bcrypt.glibc.node`, which matches an Ubuntu 24.04 droplet — inside the package tarball itself; no install script runs for it on any platform). What is genuinely still open: nobody has run `require('bcrypt').hashSync(...)` on the real droplet's OS/arch/glibc combination. `.github/workflows/deploy.yml` now runs that exact smoke test on the new release before every stop/flip (`plans/gated-deploy/architecture-notes.md` §3.4), so the check is automated going forward — but it has not yet executed on real hardware, because no droplet exists (**[HOST]**, blocked on the runbook). Do not mark this done before that first real run.
 
 ### P0 — before gated deploy — trust the proxy for client IPs — `src/server`
 
-`messages.ip` is captured from `req.socket.remoteAddress`. Once Caddy fronts the process this records **Caddy's address, not the client's**, so every row carries the same useless value and nothing fails visibly. Requires a **trusted-proxy-aware `X-Forwarded-For` extractor in the upgrade handler itself**, plus Caddy configured to set the header. Express `trust proxy` is **not sufficient and not applicable**: a raw `http.Server` `'upgrade'` event never enters the Express middleware chain, so the setting cannot affect the request the IP is actually read from. Express `trust proxy` still covers `POST /api/join` and `GET /api/session`; the WebSocket path needs its own extractor. Corrected 2026-09-07 — the original wording named a remediation that cannot work for the path that captures the IP. **REQ-MOD-003 (IP + timestamp logging) is unsatisfiable until this is done** — the column would be populated but worthless. Raised by the walking-skeleton design 2026-09-05; the feature itself runs locally and is unaffected.
+**Closed by code, 2026-09-08.** `src/server/net/client-ip.ts` (`extractClientIp`) trusts `X-Forwarded-For` only when the immediate TCP peer is loopback, wired into the WebSocket upgrade path at `src/server/ws/upgrade.ts:96`; `deploy/Caddyfile` replaces (not appends) the header with the real peer. See `docs/ARCHITECTURE.md` "Trusted-proxy client IP". Local behaviour is test-covered; the end-to-end proof that a real public IP (not `127.0.0.1`) lands in `messages.ip` is a runbook step against the live host (**[HOST]**, not yet run).
 
 ### P1 — before gated deploy — implement the launch gate — `docs/ARCHITECTURE.md`
 
-**Resolved (Phase 8): Caddy basic auth**, enforced in the reverse proxy, above the application. No application code. Still needs implementing.
+**Closed by code, 2026-09-08.** `deploy/Caddyfile` enforces `basic_auth` above the application in a contiguous, deletable block, per the Phase 8 resolution (Caddy basic auth, no application code). Applying the config to a live Caddy instance is a runbook step (**[HOST]**, not yet run).
 
 ### P1 — before gated deploy — set up a free subdomain (DuckDNS-style) — `docs/ARCHITECTURE.md`
 
-Resolved (Phase 8): free subdomain sufficient for the gated phase. Still needs doing.
+Resolved (Phase 8): free subdomain sufficient for the gated phase. `docs/RUNBOOK-gated-deploy.md` now documents the exact procedure (create the subdomain, point the A record, verify off-host resolution before touching Caddy), but nothing in this repository performs it — it is a host action with no code artifact. **Not closed here**; closes only when the owner executes that runbook step.
 
 ### P0 — before public launch — register a real domain — `gain.json`, `docs/ARCHITECTURE.md`
 
@@ -58,9 +50,9 @@ Resolved (Phase 8): free subdomain sufficient for the gated phase. Still needs d
 
 ## Blocking anonymous public access
 
-### P0 — before public launch — one scheduled maintenance task — `src/db/`
+### P1 — when the moderation migration lands — wire the `bans.ip` retention statement in for real — `src/db/retention.ts`
 
-Three statements, one task, one thing to monitor: null `messages.ip` older than 30 days; null `bans.ip` more than 30 days past `expires_at`; delete guest `users` rows whose `last_seen_at` is older than 24 hours, the guest JWT lifetime. Do not split into three cron entries — the retention promise must be enforced in one place that can be pointed at.
+**New, 2026-09-08.** The retention task's second statement (`bans.ip → NULL`) is guarded on `to_regclass('bans')` because `bans` has no migration yet (`src/db/migrations/1757800001_users_rooms_messages.sql` says so in its own comment) — landing it unguarded would abort the whole retention transaction on the missing relation and erase nothing, forever, while reporting success. The guard is deliberate and correct for now, but it becomes a permanent silent gap if nobody removes it once `bans` exists. When the moderation floor's migration ships: drop the guard (or verify it now always resolves true) and confirm `AC-RET-3`'s "table exists" branch actually runs against a real `bans` row, not just the guarded branch.
 
 ### P1 — before public launch — no hard-delete path for message bodies — `src/server/moderation`
 
@@ -69,10 +61,6 @@ Known limitation, accepted at the 2026-09-04 data model review. Moderation remov
 ### P1 — before public launch — cap `pg_dump` retention at 30 days — `docs/ARCHITECTURE.md`
 
 Privacy control, not storage housekeeping. A dump that outlives the retention window keeps erased IPs in plaintext and makes the 30-day promise false.
-
-### P0 — with `server/http` — send a Content-Security-Policy header — `src/server/http`
-
-Raised by independent review 2026-09-04: React's escaping is currently the only XSS defence, and it is defeated by a single bad line. A CSP survives one. `script-src 'self'` without `'unsafe-inline'` is compatible with Vite's hashed output, so this does not need the policy loosened to work. Build it with `server/http`, not as a later hardening pass. Rule recorded in `docs/PATTERNS/untrusted-content-rendering.md`.
 
 ### P0 — before the moderation floor — bootstrap the first admin — `src/db/`
 
@@ -104,7 +92,7 @@ Both are placeholders. The logging choice determines where retention is enforced
 
 ### P2 — after code exists — re-run pattern extraction — `docs/PATTERNS/INDEX.md`
 
-Current patterns are prescribed, not extracted. Re-derive from actual usage (2+ occurrences).
+Current patterns are prescribed, not extracted. Re-derive from actual usage (2+ occurrences). **Checked 2026-09-08 (gated-deploy chunk): no new pattern qualifies.** The client-IP extractor, the retention sweep and the deploy/systemd artifacts are each a single occurrence in this codebase — extracting a pattern from one instance would be prescription again, not extraction.
 
 ### P2 — after deploy — verify real monthly cost against estimate — `agents/IMPLEMENTATION.md`
 

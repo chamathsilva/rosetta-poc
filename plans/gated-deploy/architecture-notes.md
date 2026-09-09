@@ -424,6 +424,9 @@ Consequence for the deploy script: **`systemctl start` exiting 0 proves the bina
 
 ## 8. Failure and rollback
 
+> **SUPERSEDED IN PART — see `GATED-DEPLOY-SPECS.md` §5.6.** Plan review (2026-09-08) found this section's failure table has no row for a failed stop or a failed flip, and no branch for the first deploy, where no rollback target exists. `AC-ROL-7` and `AC-ROL-8` govern those two cases; this section does not.
+
+
 **[D] Release directories plus an atomic symlink flip. Rollback is a symlink and a restart, and it is exercised before it is trusted.**
 
 `/srv/chat/releases/<id>/` … `/srv/chat/current -> releases/<id>`. Keep the last **3** releases (~100 MB each with `node_modules`, against 25 GB of disk — the constraint is not disk). Flip atomically: `ln -sfn <target> current.tmp && mv -T current.tmp current`. `mv -T` over a symlink is a single rename syscall; `ln -sfn` directly onto an existing symlink is not atomic and can leave no `current` at all for an instant.
@@ -500,6 +503,9 @@ Four caveats, each of which would break this guarantee:
 ---
 
 ## 10. Runbook shape
+
+> **SUPERSEDED IN PART — see `GATED-DEPLOY-SPECS.md` §5.6.** This section places the off-host `:3000` reachability check at step 3, where nothing is listening yet and it passes vacuously. `AC-BIND-2` moves it to the verification step after the first deploy. `docs/RUNBOOK-gated-deploy.md` follows the specs, not this section.
+
 
 The owner executes it — **[S]**. Order matters more than prose; several steps are ordering constraints disguised as tasks.
 

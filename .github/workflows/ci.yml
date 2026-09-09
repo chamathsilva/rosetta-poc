@@ -117,10 +117,18 @@ jobs:
         run: npm run build
 
       # The deploy artifact. The droplet cannot build this itself.
+      # Named by the PR head SHA, not the ephemeral pull_request merge commit
+      # (docs/TODO.md, P2 hygiene) - github.sha on a pull_request event is a
+      # commit that exists in no branch, which makes this artifact's name
+      # misleading to a human reading the Actions UI. No code looks this
+      # artifact up programmatically (.github/workflows/deploy.yml rebuilds
+      # on its own runner instead), so this is a readability fix, not a
+      # correctness one - do not re-litigate its priority without re-reading
+      # docs/TODO.md's rationale first.
       - name: Upload the built client
         uses: actions/upload-artifact@v7
         with:
-          name: client-${{ github.sha }}
+          name: client-${{ github.event.pull_request.head.sha || github.sha }}
           path: dist/client
           if-no-files-found: error
           retention-days: 14

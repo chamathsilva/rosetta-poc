@@ -59,9 +59,23 @@ Keep template entries so that AI knows how to fill them in later on.
 - The tell was **duration**: 12 seconds for a job that must read a diff and call a model. Job duration is the cheapest lie-detector for an integration whose output is optional.
 - Rule: for any check whose success can be vacuous, verify by wall-clock and by artifact (a comment, an uploaded report), never by colour alone. Prefer configurations that fail loudly over ones that skip quietly.
 
-### \<Generalized Preventive Rule\> [ACTIVE|RETIRED]
+### A flag that does not escalate is not a control [ACTIVE]
 
-\[Root cause, Reasons, Problems\]
+- The gated-deploy plan itself instructed "stop-and-report if the `bans` question changes scope." The same authoring pass that wrote that instruction also implemented around the gap it was meant to catch (guarding the retention statement) without the report ever happening.
+- Writing an escalation condition into a plan is not the same action as escalating when that condition is met. The plan's author and the plan's executor were the same pass, so nothing outside it existed to notice the flag went unfired.
+- Rule: a "stop and report" instruction is unverified until something outside the author actually checked whether it fired. Treat an unescalated flag as equivalent to no flag at all, and audit for silent self-resolution whenever the same actor both writes a trigger condition and does the work that condition is supposed to gate.
+
+### Absence of the tools you expected is not absence of the capability [ACTIVE]
+
+- An agent concluded "no database is available" from `psql`/`docker` being missing from the shell, while a real PostgreSQL instance was listening on `5432` the whole time and its credentials sat in `.env`. It then skipped tests on that premise — one of which was independently broken, and the skip hid it.
+- The check that was run (do the expected tools exist) answered a different question than the one that mattered (is the capability reachable at all). A missing CLI is evidence about the CLI, not about the service.
+- Rule: before concluding a capability is absent, probe the capability directly (connect to the port, read the actual config for credentials) rather than inferring absence from a missing convenience tool. Treat "I don't have the tool I expected" as "I haven't checked yet," not as a finding.
+
+### A claim that rides from document to document without re-verification is how a wrong number survives three passes [ACTIVE]
+
+- "Six existing upgrade tests" was stated in discovery, repeated in architecture-notes, and repeated again in the plan — the real count was seven (`upgrade.test.ts:72,85,101,113,126,141,153`). Each later document trusted the earlier one's count instead of counting again.
+- The number was cheap to re-verify at every hop (one `grep`) and was verified at none of them until a plan reviewer did.
+- Rule: a specific count, quote, or fact that crosses a document boundary must be re-derived at the new document, not copied from the document that stated it first — copying propagates an error at zero marginal cost per hop, which is exactly what makes it survive.
 
 ## What Worked
 

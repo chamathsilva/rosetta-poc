@@ -86,6 +86,10 @@ Both are placeholders. The logging choice determines where retention is enforced
 
 ## Evaluation work
 
+### P1 — before the write-up — fold two recorded chunks into the synthesis — `docs/EVALUATION-FINDINGS.md`
+
+`docs/EVALUATION-SESSIONS/2026-09-08-ci-and-ai-review.md` and `2026-09-08-gated-deploy.md` are captured in full but **not yet synthesized** into the thematic findings. The session records report; `EVALUATION-FINDINGS.md` argues. Two themes look ready to state and are not yet written up: (1) execution and inspection find **disjoint** defect sets in this codebase, now observed three times; (2) a recurring defect shape — a claim true as written and false in fact, because the check and the claim look at different things — with four instances in one chunk. Protocol: `docs/EVALUATION-METHOD.md`.
+
 ### P1 — after accounts ship — run the no-Rosetta baseline feature — `agents/IMPLEMENTATION.md`
 
 1:1 DM, built with plain Claude Code. **Do not pre-design it** — no specs, schema, endpoints, or plans before the baseline run. See `docs/CONTEXT.md`.

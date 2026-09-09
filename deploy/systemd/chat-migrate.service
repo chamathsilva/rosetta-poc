@@ -1,0 +1,44 @@
+# chat-migrate.service — database migrations, run as a SEPARATE oneshot
+# unit rather than an ExecStartPre on chat.service or a raw SSH command.
+#
+# Design: plans/gated-deploy/architecture-notes.md §5.2, §9.
+#
+# Why not ExecStartPre on chat.service: ExecStartPre runs on EVERY start,
+# including every crash-restart, which would couple restart availability
+# to database availability and re-run the migration runner in a crash
+# loop. Migrations belong to a deploy, not to a process lifecycle
+# (AC-SYS-6).
+#
+# Why not a raw SSH command from the deploy workflow: running it as this
+# unit means migrations execute under EXACTLY the service's identity,
+# environment files, and journald stream — one definition of "the
+# application's environment" instead of two that can drift. A
+# Type=oneshot unit also gives the deploy script a real exit code
+# (`systemctl start` blocks until completion and returns non-zero on
+# failure), with the failure visible in `journalctl -u chat-migrate` next
+# to everything else.
+#
+# Migration failure semantics (arch-notes §9): node-pg-migrate defaults to
+# a single transaction and an advisory lock (verified against the
+# installed package, node_modules/node-pg-migrate/bin/node-pg-migrate.js,
+# v8.0.4) — a failing migration leaves the database exactly as it was, no
+# half-applied schema. Neither existing migration declares
+# disable_transaction; adding one that does invalidates this guarantee and
+# must not be merged without revisiting this note (AC-MIG-1, AC-MIG-2).
+#
+# The `deploy` identity needs no DATABASE_URL and never reads secrets.env
+# (arch-notes §7) — it only needs sudoers permission to `systemctl start
+# chat-migrate` (exact command, no wildcard).
+
+[Unit]
+Description=Rosetta POC chat — database migrations
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=rosetta-chat
+Group=rosetta-chat
+WorkingDirectory=/srv/chat/current
+EnvironmentFile=/etc/rosetta-chat/secrets.env
+EnvironmentFile=/srv/chat/current/deploy.env
+ExecStart=/usr/bin/node node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations

@@ -38,8 +38,12 @@ async function main(): Promise<void> {
   const stopHeartbeat = startHeartbeat(wss);
   server.on('close', stopHeartbeat);
 
-  server.listen(config.port, () => {
-    console.log(`listening on :${config.port}`);
+  // Bind loopback only (arch-notes §2, AC-BIND-1). This is the control
+  // that survives ufw being off, flushed, or never enabled - Caddy is
+  // same-host (docs/ARCHITECTURE.md "Deployment topology") so nothing
+  // legitimate ever needs to reach this port from another interface.
+  server.listen(config.port, '127.0.0.1', () => {
+    console.log(`listening on 127.0.0.1:${config.port}`);
   });
 }
 

@@ -54,7 +54,13 @@ function validToken(): string {
 
 function emitUpgrade(
   server: FakeServer,
-  opts: { path?: string; origin?: string; cookie?: string },
+  opts: {
+    path?: string;
+    origin?: string;
+    cookie?: string;
+    remoteAddress?: string;
+    xForwardedFor?: string;
+  },
 ): FakeSocket {
   const socket = new FakeSocket();
   const req = {
@@ -62,11 +68,23 @@ function emitUpgrade(
     headers: {
       origin: opts.origin,
       cookie: opts.cookie,
+      'x-forwarded-for': opts.xForwardedFor,
     },
-    socket: { remoteAddress: '127.0.0.1' },
+    socket: { remoteAddress: opts.remoteAddress ?? '127.0.0.1' },
   };
   server.emit('upgrade', req, socket, Buffer.alloc(0));
   return socket;
+}
+
+/** Captures the `ConnectionContext` (third arg to the `connection` event)
+ * so tests can assert on `context.ip` (AC-IP-8) without touching the real
+ * `ws` module. */
+function captureConnectionContext(wss: FakeWss): { ip: string | undefined } {
+  const captured: { ip: string | undefined } = { ip: undefined };
+  wss.on('connection', (_ws: unknown, _req: unknown, context: { ip: string | undefined }) => {
+    captured.ip = context.ip;
+  });
+  return captured;
 }
 
 test('upgrade: rejects a path other than /ws with 404, destroys the socket, never completes the handshake', () => {
@@ -163,4 +181,54 @@ test('upgrade: reads the session cookie correctly when other cookies are present
 
   assert.equal(socket.destroyed, false);
   assert.equal(wss.handleUpgradeCalls, 1);
+});
+
+// AC-IP-8: ConnectionContext.ip must come from extractClientIp(), not a raw
+// `req.socket.remoteAddress` read. These two tests prove the *wiring*, not
+// the extractor itself (which has its own suite in
+// src/server/net/client-ip.test.ts) - one proves a trusted (loopback) peer's
+// X-Forwarded-For reaches context.ip, the other proves an untrusted peer's
+// forwarded header is ignored. Reverting the call site in upgrade.ts back to
+// `ip: req.socket.remoteAddress` fails both: the first would then report
+// '127.0.0.1' instead of the forwarded '203.0.113.9', and the second would
+// happen to still pass (raw remoteAddress *is* '203.0.113.50' either way) -
+// which is exactly why the first test is the one that catches a revert.
+test('upgrade: ConnectionContext.ip is built from the extractor - trusted (loopback) peer forwards X-Forwarded-For (AC-IP-8)', () => {
+  const server = new FakeServer();
+  const wss = new FakeWss();
+  const captured = captureConnectionContext(wss);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attachUpgradeHandler(server as any, wss as any, ALLOWED_ORIGIN);
+
+  const socket = emitUpgrade(server, {
+    origin: ALLOWED_ORIGIN,
+    cookie: `${SESSION_COOKIE}=${validToken()}`,
+    remoteAddress: '127.0.0.1',
+    xForwardedFor: '1.2.3.4, 203.0.113.9',
+  });
+
+  assert.equal(socket.destroyed, false);
+  assert.equal(wss.handleUpgradeCalls, 1);
+  // If the call site reverted to `req.socket.remoteAddress` directly, this
+  // would be '127.0.0.1' instead.
+  assert.equal(captured.ip, '203.0.113.9');
+});
+
+test('upgrade: ConnectionContext.ip is built from the extractor - untrusted (non-loopback) peer\'s X-Forwarded-For is ignored (AC-IP-8)', () => {
+  const server = new FakeServer();
+  const wss = new FakeWss();
+  const captured = captureConnectionContext(wss);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attachUpgradeHandler(server as any, wss as any, ALLOWED_ORIGIN);
+
+  const socket = emitUpgrade(server, {
+    origin: ALLOWED_ORIGIN,
+    cookie: `${SESSION_COOKIE}=${validToken()}`,
+    remoteAddress: '203.0.113.50',
+    xForwardedFor: '1.2.3.4',
+  });
+
+  assert.equal(socket.destroyed, false);
+  assert.equal(wss.handleUpgradeCalls, 1);
+  assert.equal(captured.ip, '203.0.113.50');
 });

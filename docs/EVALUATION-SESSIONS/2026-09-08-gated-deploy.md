@@ -117,6 +117,18 @@ Every one of these was cheap to run and none was found by reading. The pattern i
 
 ---
 
+## 5a. A third-party analyser caught what two AI passes missed — PR #9, 2026-09-09
+
+Worth recording because it cuts against the rest of this chunk's story.
+
+After code review and validation had both run, passed, and had their findings fixed, **SonarCloud flagged a MAJOR security issue neither had raised**: `${{ secrets.DEPLOY_SSH_KEY }}` interpolated directly into a `run:` block. GitHub substitutes `${{ }}` into the shell script's *source text* before bash parses it, so a value carrying newlines or shell metacharacters can alter the script — and an SSH private key is multi-line by definition. Fixed by passing it through `env:`, where it is only ever data.
+
+Both AI passes read that exact file. The code reviewer specifically walked the deploy workflow's failure paths line by line as a shell reader and found a different real defect there (the unguarded rollback flip-back). Neither flagged the secret expansion.
+
+**The finding:** a cheap, deterministic, rule-based analyser contributed something that two thorough LLM passes did not — on a known, catalogued vulnerability class with a fixed shape. That is the kind of defect pattern-matching is *better* at than reasoning. It argues for keeping conventional static analysis in the loop rather than treating AI review as a superset of it.
+
+**The counter-observation, for honesty:** of SonarCloud's 10 findings on that PR, 1 was this real issue, 1 was a style preference declined with reasons, 1 was a deliberate documented decision flagged as a hotspot, and 6 were false positives triggered by comments that reference `docs/TODO.md` by name. A 10% true-positive rate on a real finding is still worth it at this price — but the signal-to-noise is the opposite shape from the AI reviews, which produced few findings and almost all real.
+
 ## 6. Carried forward
 
 **Into `agents/MEMORY.md`** — a flag that does not escalate is not a control · absence of the tools you expected is not absence of the capability · a claim that rides between documents without re-verification is how a wrong number survives three passes · a third-party action that skips itself still reports success.

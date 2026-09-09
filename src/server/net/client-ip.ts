@@ -68,7 +68,9 @@ function lastForwardedValue(forwardedFor: string | readonly string[]): string {
     ? (forwardedFor as readonly string[]).join(',')
     : (forwardedFor as string);
   const parts = combined.split(',');
-  return (parts[parts.length - 1] ?? '').trim();
+  // .at(-1) rather than [length - 1]: same value, and it reads as "the last
+  // one", which is the security property (architecture-notes §1.4).
+  return (parts.at(-1) ?? '').trim();
 }
 
 /**

@@ -209,16 +209,25 @@ jobs:
       #    the runner.
       # ---------------------------------------------------------------
       - name: Configure SSH for the deploy identity
+        # Secrets arrive as environment variables, NOT interpolated into the
+        # script body. GitHub expands ${{ }} into the shell source text
+        # before bash parses it, so a value containing newlines or shell
+        # metacharacters - and an SSH private key is multi-line by
+        # definition - can alter the script itself. Via env: the value is
+        # only ever data. Flagged by SonarCloud on PR #9, 2026-09-09.
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
           # Pinned at runbook step 11 from `ssh-keyscan` run on the
           # droplet console, not from a first connection here - so this
           # workflow never TOFU-trusts the host key (arch-notes §10 step 11).
-          printf '%s\n' "${{ vars.SSH_KNOWN_HOSTS }}" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
           {
             echo "SSH_OPTS=-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"

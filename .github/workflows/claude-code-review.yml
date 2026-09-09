@@ -36,10 +36,46 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
 
+          # The generated config used plugins: 'code-review@claude-code-plugins'
+          # with a /code-review:code-review slash command. That path is broken
+          # upstream - anthropics/claude-code-action#1290: adding a marketplace
+          # spawns ~/.local/bin/claude, which the installer does not create, so
+          # the job dies with ENOENT. Reproduced here 2026-09-08 on PR #8.
+          # The plugin only supplied the slash command, so the review is spelled
+          # out below instead. Inline commenting is unaffected - it comes from
+          # the MCP tool in claude_args, not from the plugin.
+          #
+          # If this check ever passes suspiciously fast with no comments, add
+          # show_full_output: true and read the log: the action exits SUCCESS
+          # when its workflow validation skips (the file must be identical to
+          # the version on the default branch), which is indistinguishable from
+          # a clean review. See also claude-code-action#1644.
+          prompt: |
+            Review this pull request. Leave inline comments on the exact lines
+            that need them, and keep them few and specific.
+
+            Ground the review in this repository's own decisions, not in generic
+            best practice:
+
+            - docs/CONTEXT.md - this repo has two subjects, a chat product and
+              an evaluation of the Rosetta instruction layer. Judge scope
+              against it.
+            - docs/ARCHITECTURE.md - the data model is approved and every
+              decision carries its reason. Flag any change that silently
+              reverses one, including the connection-pool keys in src/db/pool.ts.
+            - docs/PATTERNS/ - parameterized pg queries only (no string-built
+              SQL, no ORM), escaped rendering of user content, JWT cookie
+              sessions, env-var config with fail-fast.
+            - WebSocket disconnect cleanup is the known bug class for the
+              in-process room design: a socket must leave the Set on close and
+              on error, the Set must be deleted when empty, and every broadcast
+              must guard readyState.
+            - 1:1 direct messaging is the reserved no-Rosetta baseline feature.
+              Flag any DM schema, endpoint, spec or plan as a guardrail breach.
+            - docs/TODO.md lists known gaps. Do not re-report them as findings.
+
+            Report correctness defects, security issues and pattern violations.
+            Say plainly when you find nothing. Do not restate the diff, and do
+            not submit a formal approval or change request - comment only.
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(git diff:*),Bash(git log:*)"'

@@ -43,6 +43,15 @@ Five workflows:
 
 **Reconciled with parallel human work, 2026-09-08.** While this branch was in review the user created `develop` as the integration branch, retargeted the PR onto it, and ran `/install-github-app`, whose PR #4 merged workflows at the same two paths — an add/add conflict between two independent solutions to the same problem. Resolved by **keeping the vendor-generated workflows and discarding the hand-written pair**, and by retargeting the CI and CodeQL push triggers from `docs/data-model-approval` to `develop`. Cost of the collision: the hand-written draft/fork guards and the repository-grounded review prompt (`docs/TODO.md`).
 
+**The AI reviewer was green and inert, and only a deliberate probe found it** (2026-09-08, throwaway PRs #6, #7, #8, all closed). The `claude-review` check passed on PR #3 in 12 seconds with no comments and an empty summary — the same appearance as a clean review. Two independent silent causes:
+
+1. **`claude-code-action` validates that its workflow file matches the copy on the repository's default branch, and exits SUCCESS when that fails.** The default branch was still `docs/data-model-approval`, which carries no Claude workflows, so every review was skipped. **Fixed by making `develop` the default branch** — it is where PRs merge and where the workflows live.
+2. **The generated plugin config cannot run**: `plugin_marketplaces` spawns `~/.local/bin/claude`, which the installer does not create — open upstream bug `anthropics/claude-code-action#1290`. Reproduced on PR #8. **Fixed by dropping the plugin** and spelling the review out in the prompt; inline commenting comes from the MCP tool in `claude_args`, not from the plugin, so it survives.
+
+The probe that exposed it: a file that passes lint and typecheck and adds a socket to a room `Set` with no close/error cleanup — the one defect class `docs/ARCHITECTURE.md` names for this design. The reviewer never saw it.
+
+**Still unproven, honestly stated:** the reviewer cannot be observed working until this merges, because the action compares its workflow against the default branch. First PR after the merge that touches no workflow file is the test (`docs/TODO.md`).
+
 **Credentials resolved 2026-09-08.** The Claude jobs failed with `Claude Code is not installed on this repository` until the user ran `/install-github-app`; the `CLAUDE_CODE_OAUTH_TOKEN` secret now exists. Neither Claude job is a required status check, so the failures never blocked a merge.
 
 **Validated by deliberate failure, not by a green run** (2026-09-08, throwaway PR #5, since closed and its branch deleted). A passing check is equally consistent with the check not running, so each one was made to fail on purpose (`agents/MEMORY.md`, *Prove a config is doing work by making it fail on purpose*):

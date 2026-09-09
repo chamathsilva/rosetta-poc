@@ -52,6 +52,13 @@ Keep template entries so that AI knows how to fill them in later on.
 - Both Claude workflows were authored from the action's own `action.yml` inputs, which say nothing about required permissions — the inputs are documented, the permissions are not.
 - Rule: after adding a third-party action, run it once and read the failure, rather than assuming the permissions copied from an example are complete. Permission defects surface only at execution, like the migration verb defect below.
 
+### A third-party action that skips itself still reports SUCCESS [ACTIVE]
+
+- `claude-code-action` validates that its workflow file is identical to the copy on the repository's **default branch**, and when that fails it logs a warning and exits **success**. The repo's default branch was a stale `docs/data-model-approval` carrying no Claude workflows, so every review was skipped and every check was green.
+- Nothing about the PR looked wrong: green check, no comments — the same appearance as a clean review.
+- The tell was **duration**: 12 seconds for a job that must read a diff and call a model. Job duration is the cheapest lie-detector for an integration whose output is optional.
+- Rule: for any check whose success can be vacuous, verify by wall-clock and by artifact (a comment, an uploaded report), never by colour alone. Prefer configurations that fail loudly over ones that skip quietly.
+
 ### \<Generalized Preventive Rule\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]

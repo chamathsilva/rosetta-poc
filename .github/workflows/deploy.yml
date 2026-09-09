@@ -159,6 +159,9 @@ jobs:
 
           mkdir -p "$RELDIR/dist" "$RELDIR/src/db"
 
+          # NOTE: mkdir -p above only creates the parent - dist/db itself is
+          # created by the cp -r below, same pattern as dist/server/client.
+
           # Required at the release root so Node resolves ESM correctly
           # (see step comment above).
           cp package.json "$RELDIR/"
@@ -171,6 +174,16 @@ jobs:
           # resolves it as path.join(import.meta.dirname, '../client').
           cp -r dist/server "$RELDIR/dist/server"
           cp -r dist/client "$RELDIR/dist/client"
+
+          # dist/db is REQUIRED at runtime, not optional: src/server/index.ts
+          # imports ../db/pool.js and ../db/queries/rooms.js, which resolve
+          # here; rosetta-chat-retention.service's ExecStart also targets
+          # dist/db/retention.js directly. Omitting this compiles clean,
+          # passes every AC that doesn't name this exact path, and crashes
+          # the service at first start with ERR_MODULE_NOT_FOUND - found by
+          # validation 2026-09-09 reconstructing this exact release tree and
+          # running it, not by reading this file.
+          cp -r dist/db "$RELDIR/dist/db"
 
           # chat-migrate.service's ExecStart runs node-pg-migrate with
           # `-m src/db/migrations`, source-tree-relative plain .sql files -
@@ -294,8 +307,15 @@ jobs:
             echo "Rolling back: stopping chat, flipping current back to $PREVIOUS_RELEASE, restarting." >&2
             echo "Rollback never runs a down migration (arch-notes §8.3) - schema is left forward." >&2
             sudo systemctl stop chat || true
-            ln -sfn "$PREVIOUS_RELEASE" "$RELEASES_DIR/current.tmp"
-            mv -T "$RELEASES_DIR/current.tmp" "$CURRENT_LINK"
+            # Guarded like the primary flip (step [3] below) - this is the
+            # path that runs when everything else has already failed, so it
+            # is the one place a silent `set -e` exit would be worst. Found
+            # by code review 2026-09-09: this flip-back had no guard while
+            # the primary flip three lines below always did.
+            if ! ( ln -sfn "$PREVIOUS_RELEASE" "$RELEASES_DIR/current.tmp" && mv -T "$RELEASES_DIR/current.tmp" "$CURRENT_LINK" ); then
+              echo "FATAL: rollback's own flip-back to $PREVIOUS_RELEASE failed. 'current' is now in an UNKNOWN state - it may still point at the broken $NEW_RELEASE, or at neither release. The chat service is STOPPED. This requires manual intervention on the droplet: inspect $CURRENT_LINK, point it at a known-good release by hand, then 'sudo systemctl start chat'." >&2
+              exit 1
+            fi
             sudo systemctl start chat
             echo "Rollback complete - service restored to $PREVIOUS_RELEASE. This run still exits non-zero." >&2
             exit 1

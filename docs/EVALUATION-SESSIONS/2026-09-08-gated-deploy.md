@@ -61,7 +61,7 @@ Prepared the walking skeleton's first real deployment: trusted-proxy client-IP e
 
 ## 3. Defects, and which pass caught each
 
-**This is the table the evaluation exists to produce.**
+**This is the table the evaluation exists to produce.** (Extended in §5c with 5 more defects from a second human-review round on the runbook, and in §5a with the SonarCloud finding — 23 defects total across this chunk, by the end.)
 
 | # | Defect | Caught by | Passes that missed it |
 |---|---|---|---|
@@ -141,9 +141,41 @@ Both AI passes read that exact file. The code reviewer specifically walked the d
 
 **The transferable point:** "the PR merged" and "the PR's latest reviewed content merged" are different claims, and the gap between them is invisible to every check that runs *inside* the merged commit. The only way to catch it is to diff the destination branch against the specific commit you believe was merged, not against the PR number.
 
+## 5c. A human review round found what the AI code review and AI validation both missed on the same artifact — PR #9/#10, 2026-09-10
+
+**Round 1 of human review at G4** (the provisioning-approval gate) found five execution-blocking defects in `docs/RUNBOOK-gated-deploy.md` — a document that had already passed an AI code review and an AI validation pass. Fixed as commit `131d044`.
+
+**Round 2 of human review, on the corrected document, found five more** — three P1, two P2:
+
+| # | Defect | Severity |
+|---|---|---|
+| 1 | Step 11 re-ran `ssh-keygen -f ./deploy_key` after step 0.3 had already generated it and step 2.2 already installed the public half. Accepting the overwrite silently mismatches the two; declining leaves an undocumented no-op. Both login checks also used a plain `ssh deploy@host`, which does not find a nonstandard key filename without `-i` | P1 |
+| 2 | Step 10.4's own heading claimed it was "the last root-only action." It was the last root-**SSH** action — five later steps (13e's fallback, 13f, 13g, 13j, 13k) need privileges `deploy`'s intentionally narrow four-command sudoers allowlist does not grant | P1 |
+| 3 | The `/ws` fallback's own `caddy validate` call repeated the missing-`--envfile` defect that round 1 had already fixed at the primary validation call, three sections earlier in the same file | P1 |
+| 4 | "Exactly three `ALLOW` rules" for the firewall check is wrong on stock Ubuntu 24.04: IPv6 is on by default, so `ufw allow <port>/tcp` produces six lines, not three — a correct configuration would have read as a failure | P2 |
+| 5 | Step 12's expected release contents still didn't list `dist/db/`, even though `deploy.yml` itself had already been fixed to ship it two rounds earlier | P2 |
+
+Fixed as commit `576b001`, merged via PR #11.
+
+**Two things about this round are worth keeping.**
+
+First, **the same artifact absorbed two independent human-review passes and yielded a nontrivial defect count both times** — five, then five more. Neither AI pass (code review, validation) found any of the ten. All ten share a property neither AI pass's method was built to catch: they only surface when you *simulate executing the document as an operator, in the stated order*, tracking what identity is authenticated at each point and what that identity is actually permitted to do next. Reading the document — even reading it very carefully, even mutating code to test behavior, which the AI passes did do elsewhere in this chunk — is a different operation from simulating its execution as a sequence of state transitions. This project's evaluation should treat "runbooks and other human-executed sequential documents" as a defect class requiring a distinct verification method, not as regular prose to be reviewed.
+
+Second, **finding #2 is the most structurally interesting defect in the whole chunk.** It was not a typo or an omission — it was a claim ("this is the last root-only action") that was true of the author's own intent and false of the document's actual remaining content, discovered only by cross-referencing five *separate* later steps against one earlier sudoers definition. This is the same "true as written, false in fact" shape that produced defects #1, #4, #13, #14 in section 3's table, now observed for a sixth time and in its most elaborate form yet — a false claim requiring five-way cross-referencing to falsify, rather than a single wrong number.
+
+## 5d. The orchestrator's own merge-verification method failed once and needed a second layer
+
+After PR #9's merge race (5b), the orchestrator's stated fix was "diff the destination branch against the specific commit SHA believed merged, not against the PR number." Verifying PR #11's merge using exactly that method produced a **false negative**: the diff showed the fix apparently absent from `develop`.
+
+Root cause, traced before accepting the false result: the verification's own `git fetch` had failed silently mid-command with `Permission denied (publickey)` — an SSH credential issue in this shell session unrelated to the merge itself — so the subsequent diff compared the fix commit against a **stale local ref** left over from before PR #11 merged, not against `develop`'s real current state. The failed `fetch` was not checked for a nonzero exit before the ref it was supposed to update was trusted.
+
+**Resolved two ways, in order**: first by reading the file directly from GitHub's Contents API (`gh api .../contents/...?ref=develop`), which uses `gh`'s own HTTPS token and does not depend on the broken SSH path at all — confirming the fix genuinely was on `develop`; then by fetching over an explicit HTTPS URL rather than the configured SSH `origin`, without altering the user's own remote configuration, to restore normal git operation for the rest of the session.
+
+**The rule inside the rule**: verifying a claim by diffing against a ref is only as trustworthy as the step that populated the ref. A fetch (or any command) whose exit code is not checked can leave a "current" reference silently stale, and a diff against a stale-but-plausible ref produces a wrong answer with no error message anywhere in the chain. The fix in 5b ("diff against the specific SHA") was necessary but not sufficient; it needed "and confirm the ref you diffed against was actually just updated, successfully" as a second, explicit layer.
+
 ## 6. Carried forward
 
-**Into `agents/MEMORY.md`** — a flag that does not escalate is not a control · absence of the tools you expected is not absence of the capability · a claim that rides between documents without re-verification is how a wrong number survives three passes · a third-party action that skips itself still reports success.
+**Into `agents/MEMORY.md`** — a flag that does not escalate is not a control · absence of the tools you expected is not absence of the capability · a claim that rides between documents without re-verification is how a wrong number survives three passes · a third-party action that skips itself still reports success · a merged PR does not guarantee the reviewed commit is what merged · a runbook must be verified by simulating its execution in order, not by reading it · a ref-diff is only as trustworthy as the fetch that populated the ref.
 
 **Still open**, and named honestly rather than closed optimistically. Nothing is deployed, so 31 of 84 acceptance criteria await a droplet. Precisely on retention: **the task covers the current schema completely** — `messages.ip` erasure and guest reaping both run; the `bans.ip` statement is *intentionally dormant* because the `bans` table does not exist, and it is guarded so its absence cannot abort the rest. That is a designed no-op, not a shortfall. Also open: no backups; no monitoring or alerting; **no patching or unattended-upgrade policy**; **no log-retention control** (journald's default rotation is a disk policy, not the 30-day privacy promise); no rate limiting; **no registered, owner-controlled domain** — DuckDNS provides a real, working hostname, but the published abuse contact needs one the owner controls; the capacity ceiling is unmeasured. All from arch-notes §11. See `docs/TODO.md`.
 

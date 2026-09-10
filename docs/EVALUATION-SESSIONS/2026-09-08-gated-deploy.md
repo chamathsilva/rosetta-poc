@@ -129,6 +129,18 @@ Both AI passes read that exact file. The code reviewer specifically walked the d
 
 **The counter-observation, for honesty:** of SonarCloud's 10 findings on that PR, 1 was this real issue, 1 was a style preference declined with reasons, 1 was a deliberate documented decision flagged as a hotspot, and 6 were false positives triggered by comments that reference `docs/TODO.md` by name. A 10% true-positive rate on a real finding is still worth it at this price — but the signal-to-noise is the opposite shape from the AI reviews, which produced few findings and almost all real.
 
+## 5b. A merge landed one commit behind the fix it was meant to include — 2026-09-10
+
+**PR #9 merged at commit `ccaa26c`, one commit before `131d044`** — the commit that fixed all five blocking findings the human reviewer raised at the G4 gate in section 5a's aftermath. The merge event's timestamp (05:36:10 UTC) predates the fix commit's own timestamp (05:43:25 UTC), so whatever triggered the merge used a HEAD that was already stale by the time it executed — most plausibly a merge action taken against a page or CLI state that had not yet observed the final push.
+
+**The orchestrator's advice in the prior turn had already told the user to re-review the runbook diff before merging.** That advice was sound and was overtaken by events anyway: the merge happened before the fix was even fully in view, not after a review that missed it. No review layer failed here — a sequencing race did.
+
+**Caught by**, in order: the user reporting "PR is merged, check it" rather than assuming silence meant success; then a direct diff of `develop`'s file against both the pre-fix and post-fix commits, which showed `develop`'s runbook byte-identical to the *pre-fix* version. Not caught by any CI check, because the merged content was internally valid — it was simply the wrong, already-superseded version. **A green CI run on a merge cannot tell you the merge included what you meant it to.**
+
+**Fixed** by a new PR (#10) containing exactly the missing commit, verified as a clean, conflict-free, single-commit diff before opening it (`git merge-tree`).
+
+**The transferable point:** "the PR merged" and "the PR's latest reviewed content merged" are different claims, and the gap between them is invisible to every check that runs *inside* the merged commit. The only way to catch it is to diff the destination branch against the specific commit you believe was merged, not against the PR number.
+
 ## 6. Carried forward
 
 **Into `agents/MEMORY.md`** — a flag that does not escalate is not a control · absence of the tools you expected is not absence of the capability · a claim that rides between documents without re-verification is how a wrong number survives three passes · a third-party action that skips itself still reports success.

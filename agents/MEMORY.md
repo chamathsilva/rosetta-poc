@@ -217,6 +217,12 @@ Keep template entries so that AI knows how to fill them in later on.
 - Fixed: `"build:client": "NODE_ENV=production vite build"` — forces the client build's mode regardless of the ambient environment. Verified under the worst case (`NODE_ENV=development` explicitly exported) that the fix holds.
 - Generalizes: a build tool that appears to control its own mode (`vite build` is nominally always a production build) can still be silently overridden by an inherited environment variable if some part of its dependency chain (here, React itself) reads `process.env.NODE_ENV` directly rather than trusting the bundler's internal mode. An intermittent, hard-to-reproduce build artifact size is worth root-causing, not writing off after a couple of clean retries — retrying with the *same* ambient environment does not test the actual variable.
 
+### A merged PR does not guarantee the reviewed commit is what merged [ACTIVE]
+
+- PR #9 merged at a commit one revision behind a fix that had just been reviewed and pushed. The merge event's timestamp predated the fix commit's own timestamp — the merge used a HEAD that was already stale.
+- No CI check caught it: the merged content was internally valid, just the wrong, already-superseded version. A green run on a merge proves the merged commit is consistent with itself, not that it is the commit anyone reviewed.
+- Rule: after a merge, diff the destination branch against the specific commit SHA you believe was merged — not against the PR number, and not against "the branch as of my last push". Do this whenever a merge follows closely on a late-arriving fix.
+
 ### \<Generalized Discovery\> [ACTIVE|RETIRED]
 
 \[Usage, Reasons, Problems\]

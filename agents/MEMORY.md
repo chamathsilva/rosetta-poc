@@ -46,6 +46,19 @@ Keep template entries so that AI knows how to fill them in later on.
 - Under systemd a clean immediate exit reads as a healthy unit, so this would have been much harder to diagnose than a crash.
 - Rule: when writing a placeholder whose purpose is to fail, run it and confirm a non-zero exit. Intent expressed in a comment is not behaviour.
 
+### A GitHub Action's `permissions` block is part of its contract, not boilerplate [ACTIVE]
+
+- `anthropics/claude-code-action@v1` exchanges the workflow's OIDC token, so without `id-token: write` it fails before it ever reads the credentials secret. The error names OIDC, not the missing permission's consequence.
+- Both Claude workflows were authored from the action's own `action.yml` inputs, which say nothing about required permissions — the inputs are documented, the permissions are not.
+- Rule: after adding a third-party action, run it once and read the failure, rather than assuming the permissions copied from an example are complete. Permission defects surface only at execution, like the migration verb defect below.
+
+### A third-party action that skips itself still reports SUCCESS [ACTIVE]
+
+- `claude-code-action` validates that its workflow file is identical to the copy on the repository's **default branch**, and when that fails it logs a warning and exits **success**. The repo's default branch was a stale `docs/data-model-approval` carrying no Claude workflows, so every review was skipped and every check was green.
+- Nothing about the PR looked wrong: green check, no comments — the same appearance as a clean review.
+- The tell was **duration**: 12 seconds for a job that must read a diff and call a model. Job duration is the cheapest lie-detector for an integration whose output is optional.
+- Rule: for any check whose success can be vacuous, verify by wall-clock and by artifact (a comment, an uploaded report), never by colour alone. Prefer configurations that fail loudly over ones that skip quietly.
+
 ### \<Generalized Preventive Rule\> [ACTIVE|RETIRED]
 
 \[Root cause, Reasons, Problems\]
@@ -77,6 +90,13 @@ Keep template entries so that AI knows how to fill them in later on.
 - Second: the orchestrator reported a lost-message window as live. The architect showed it was structurally real but unreachable, citing `pg-pool`'s FIFO `_pendingQueue` (`push` at 207/231, `shift` at 156) — verified in source by the orchestrator. It then **made the fix anyway**, on the grounds that an invariant resting on a library's internal scheduling is not something a design should rest on.
 - The second is the more valuable behaviour: it neither complied silently nor used being right as grounds to refuse the change.
 - Generalizes: "push back with evidence" produces useful dissent only when the subagent is also told the standard of evidence. Both pushbacks cited a file and line or a measurement, because that was demanded. A bare instruction to "disagree if you disagree" would not have produced either.
+
+### Breaking CI on a throwaway PR settled in two runs what a green run could not settle at all [ACTIVE]
+
+- The CI added 2026-09-08 was green on its own PR. That is equally consistent with the checks working and with them checking nothing — CodeQL in particular reported `results=0` across 201 rules.
+- Six deliberate defects on a scratch branch (unused variable, type error, failing assertion, invalid migration SQL, a SQL-injection sink, a dependency with a known high advisory) made each check fail at the exact step intended, and removing them returned CodeQL and dependency review to green — proving the checks track the diff rather than emitting constant noise.
+- Cost: one scratch branch, two CI runs, deleted afterwards. The PR under review kept a clean history.
+- Rule: validate a new gate by making it fail, on a branch you throw away. Applies to CI, lint configs, alerting and health checks alike.
 
 ### \<Generalized What Worked\> [ACTIVE|RETIRED]
 

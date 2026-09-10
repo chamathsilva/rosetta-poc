@@ -14,9 +14,23 @@ Per-feature token and wall-clock cost, plus with/without-Rosetta marking. Requir
 
 ## Blocking deployment (gated)
 
-### P0 — before gated deploy — build the client in CI, not on the droplet — `.github/workflows/`
+### P0 — before gated deploy — ship the CI-built client to the droplet — `.github/workflows/`
 
-The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. CI must build and ship `dist/client` as a deploy artifact. Without this the deploy produces a server with no UI, and nothing fails loudly.
+The droplet installs with `npm ci --omit=dev`, and React/Vite are devDependencies, so the droplet cannot build the client. Without a shipped build the deploy produces a server with no UI, and nothing fails loudly.
+
+**Half done, 2026-09-08.** `.github/workflows/ci.yml` builds the client and uploads `dist/client` as an artifact. **Nothing consumes that artifact** — no deploy workflow exists, so the remaining half is a CD job that downloads it onto the droplet.
+
+### P1 — with the deploy job — name the client artifact by the head SHA — `.github/workflows/ci.yml`
+
+On `pull_request` events `github.sha` is the ephemeral merge commit, so the artifact uploaded by the build job is `client-<merge sha>` — a commit that exists in no branch. Found by validation 2026-09-08. Harmless today because nothing consumes the artifact; it becomes a silent lookup failure the moment a deploy job resolves it by head SHA. Use `github.event.pull_request.head.sha || github.sha`.
+
+### P1 — on the first PR after this merges — prove the AI reviewer actually reviews — `.github/workflows/claude-code-review.yml`
+
+**It never has.** Three test PRs on 2026-09-08 all produced a green `claude-review` check with no review: two were skipped by the action's workflow validation (the file must match the version on the **default branch**, which then had no Claude workflows at all), and the third died on `claude-code-action#1290`. The default branch is now `develop` and the plugin config is removed, but a check that reports SUCCESS when it skips cannot be trusted on appearance. Confirm on the first PR that touches no workflow file: the job should take minutes, not seconds, and should comment. A deliberate defect that passes lint and typecheck — a socket added to a room `Set` with no close/error cleanup — is the cheapest probe.
+
+### P2 — before public launch — the Claude workflows have no fork or draft guard — `.github/workflows/`
+
+The vendor-generated workflows were kept over guarded alternatives **[USER-DECIDED — 2026-09-08]**. Consequence on a **public** repository: a pull request from a stranger's fork triggers them, and GitHub withholds secrets from fork runs, so the checks fail on every outside contribution. Draft PRs are also reviewed, which spends tokens on unfinished work. Neither is a required check, so neither blocks a merge. Revisit if outside PRs ever arrive.
 
 ### P1 — replaced by the walking skeleton — remove the scaffold stubs — `src/`
 

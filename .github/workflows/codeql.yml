@@ -1,0 +1,45 @@
+# Static analysis. CodeQL's javascript-typescript pack covers both the server
+# and the React client. `security-and-quality` is used rather than the default
+# `security` suite: this workflow is part of a code-review setup, so quality
+# queries (dead code, unused variables, suspicious comparisons) are wanted.
+#
+# build-mode: none - nothing is compiled for the scan. CodeQL reads the
+# TypeScript sources directly; `npm run build` is the CI job's concern.
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+      - main
+  schedule:
+    # Weekly, so newly published queries reach existing code without a push.
+    - cron: '17 4 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-and-quality
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript

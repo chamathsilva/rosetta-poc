@@ -16,9 +16,61 @@ Style: baseline first, then one h3 per change with date and a one-line descripti
 
 ## Major Implemented Workstreams
 
+- **CI and automated code review** (2026-09-08): five GitHub Actions workflows — quality gate with a real PostgreSQL 17, Claude PR review, `@claude` on demand, CodeQL, dependency review. `.github/workflows/`.
 - **Walking skeleton** (2026-09-08): guest nickname join, single-room chat, WebSocket fan-out, persisted to Postgres. First application code in the project. `src/db/`, `src/server/`, `src/client/`, `src/shared/`. See changelog entry below for the full account.
 
 ## Change log
+
+### CI and automated code review on GitHub Actions: complete, 2026-09-08
+
+**First CI in the project.** `.github/workflows/` created from nothing — the repository had no `.github/` directory. Scope confirmed by the user across two HITL rounds (7 questions) before any file was written.
+
+Five workflows:
+
+| File | Trigger | Purpose |
+|---|---|---|
+| `ci.yml` | every PR (any base) + push to `docs/data-model-approval`, `main` | `lint`, `typecheck`, tests against a `postgres:17` service container, `build` + `dist/client` artifact |
+| `claude-code-review.yml` | every PR | `anthropics/claude-code-action@v1`, inline comments via the `code-review` plugin — **the `/install-github-app` version, kept over the hand-written one [USER-DECIDED]** |
+| `claude.yml` | `@claude` mention on issues, PRs, review comments | On-demand Claude — same provenance |
+| `codeql.yml` | PRs, pushes, weekly cron | CodeQL `javascript-typescript`, `security-and-quality`, `build-mode: none` |
+| `dependency-review.yml` | every PR | Fails the PR on a newly-introduced `high`+ advisory |
+
+**Test job runs against a real database, not a mock.** The `_test` database is created explicitly with `psql` and migrated with `node-pg-migrate`, because `docker/postgres-init/` only runs under Docker Compose and never for an Actions service container. This is the direct consequence of the 2026-09-08 migration defect recorded above: reading a migration path proves nothing, running it proves something, so CI runs it on every PR.
+
+**Fork PRs are skipped by the Claude workflows.** The repository is public, GitHub withholds secrets from fork PRs, and running Claude with write permissions over untrusted fork content is a prompt-injection path.
+
+**Verified on PR #3, not assumed.** CI, CodeQL and dependency review all pass against the real repository. Two defects were found by running them, both invisible to review: `id-token: write` was missing, so the Claude action failed on an OIDC exchange before it ever reached its credentials; and the repository's Dependency graph was off, so `dependency-review` errored out. The Dependency graph is now enabled.
+
+**Reconciled with parallel human work, 2026-09-08.** While this branch was in review the user created `develop` as the integration branch, retargeted the PR onto it, and ran `/install-github-app`, whose PR #4 merged workflows at the same two paths — an add/add conflict between two independent solutions to the same problem. Resolved by **keeping the vendor-generated workflows and discarding the hand-written pair**, and by retargeting the CI and CodeQL push triggers from `docs/data-model-approval` to `develop`. Cost of the collision: the hand-written draft/fork guards and the repository-grounded review prompt (`docs/TODO.md`).
+
+**The AI reviewer was green and inert, and only a deliberate probe found it** (2026-09-08, throwaway PRs #6, #7, #8, all closed). The `claude-review` check passed on PR #3 in 12 seconds with no comments and an empty summary — the same appearance as a clean review. Two independent silent causes:
+
+1. **`claude-code-action` validates that its workflow file matches the copy on the repository's default branch, and exits SUCCESS when that fails.** The default branch was still `docs/data-model-approval`, which carries no Claude workflows, so every review was skipped. **Fixed by making `develop` the default branch** — it is where PRs merge and where the workflows live.
+2. **The generated plugin config cannot run**: `plugin_marketplaces` spawns `~/.local/bin/claude`, which the installer does not create — open upstream bug `anthropics/claude-code-action#1290`. Reproduced on PR #8. **Fixed by dropping the plugin** and spelling the review out in the prompt; inline commenting comes from the MCP tool in `claude_args`, not from the plugin, so it survives.
+
+The probe that exposed it: a file that passes lint and typecheck and adds a socket to a room `Set` with no close/error cleanup — the one defect class `docs/ARCHITECTURE.md` names for this design. The reviewer never saw it.
+
+**Still unproven, honestly stated:** the reviewer cannot be observed working until this merges, because the action compares its workflow against the default branch. First PR after the merge that touches no workflow file is the test (`docs/TODO.md`).
+
+**Credentials resolved 2026-09-08.** The Claude jobs failed with `Claude Code is not installed on this repository` until the user ran `/install-github-app`; the `CLAUDE_CODE_OAUTH_TOKEN` secret now exists. Neither Claude job is a required status check, so the failures never blocked a merge.
+
+**Validated by deliberate failure, not by a green run** (2026-09-08, throwaway PR #5, since closed and its branch deleted). A passing check is equally consistent with the check not running, so each one was made to fail on purpose (`agents/MEMORY.md`, *Prove a config is doing work by making it fail on purpose*):
+
+| Injected defect | Check | Result |
+|---|---|---|
+| Unused variable | Lint step | failed |
+| `const answer: number = 'forty-two'` | Typecheck step, and Build | both failed |
+| `assert.equal(1, 2)` | Tests (PostgreSQL 17) | failed |
+| Invalid SQL in a third migration | Tests, at the *Migrate the test database* step | failed — the step is load-bearing, not decorative |
+| Request input concatenated into SQL | CodeQL | `js/sql-injection`, high, correct line |
+| `lodash` pinned to 4.17.15 | Dependency review | failed on 3 high advisories |
+| (draft PR) | Claude review | skipped — the draft guard works |
+
+Dependency review and CodeQL both returned to green when the defects were removed, so the failures track the diff rather than being constant noise. Evidence from the real run on the PR head: test database created, both migrations applied, **83 tests / 83 pass / 0 skipped**, client artifact `index.html` + one hashed 196 KB bundle, CodeQL 201 rules.
+
+**Known gap found during validation:** on `pull_request` events `github.sha` is the ephemeral merge commit, so the client artifact is named after a commit absent from the branch history. A deploy job that looks it up by head SHA will not find it. Logged in `docs/TODO.md`.
+
+**Branch protection** on `docs/data-model-approval` requires *Lint and typecheck*, *Tests (PostgreSQL 17)*, *Build* and *Analyze (javascript-typescript)*. Admins are exempt and no approving review is required — this is a solo repository, and a required approval would make every PR unmergeable.
 
 ### Walking skeleton implemented and end-to-end verified: complete, 2026-09-08
 

@@ -1,0 +1,28 @@
+# Blocks a pull request that introduces a dependency with a known high or
+# critical advisory, or a licence outside the allowed set. Runs on the diff
+# only - it does not audit dependencies that are already in the tree.
+#
+# `bcrypt` is a native module and `pg`, `ws` and `express` carry the runtime
+# surface; a bad transitive addition here reaches the droplet directly.
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

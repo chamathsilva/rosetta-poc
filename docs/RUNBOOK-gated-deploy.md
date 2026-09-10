@@ -130,9 +130,12 @@ can touch secrets or restart itself.
 
 4. **Confirm `deploy` can log in — but do not disable root SSH yet.**
 
-   Open a **second terminal** and confirm:
+   Open a **second terminal** and confirm, using the key generated in step 0.3 explicitly --
+   plain `ssh deploy@<droplet-ip>` will very likely fail here, because `./deploy_key` is not one of
+   the filenames (`id_rsa`, `id_ed25519`, ...) the SSH client searches for automatically, and
+   nothing has added it to an agent:
    ```
-   ssh deploy@<droplet-ip>
+   ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>
    ```
    Expected: you land in a `deploy` shell with no password prompt.
 
@@ -164,7 +167,14 @@ ufw enable
 ufw status verbose
 ```
 **[HOST] AC-BIND-3** — expected `ufw status verbose` output: `Status: active`, default `deny
-(incoming)`, and exactly three `ALLOW` rules for `22`, `80`, `443`. Record this output.
+(incoming)`, and **ALLOW entries covering exactly the three ports 22, 80, 443, and no others.**
+Do not count lines: Ubuntu 24.04 ships with IPv6 firewalling enabled by default (`/etc/default/ufw`,
+`IPV6=yes`), and `ufw allow <port>/tcp` applies to both stacks -- so the normal, correct result is
+commonly **six** lines (three ports × IPv4 and `(v6)`), not three. A stock configuration showing
+three lines instead of six is not necessarily wrong (a droplet with no IPv6 configured at the
+network level may show only the v4 half), but a build that shows exactly three assuming that is
+the only correct count would reject a working firewall (found in review, 2026-09-10). Record the
+full output either way.
 
 Do **not** yet check whether `:3000` is reachable from off-host — nothing is listening there yet,
 so the check would pass vacuously either way (SPECS §5.6). That check is step 13i.
@@ -465,10 +475,22 @@ that never being noticed.
 `/srv/chat/current` yet — starting either now fails in a way that looks alarming and proves
 nothing. The first legitimate start happens inside step 12's deploy script.
 
-### 10.4 SSH hardening — the last root-only action
+### 10.4 SSH hardening — the last root-**SSH** action, not the last root action
 
 Deferred from step 2 on purpose: everything above needed unrestricted root, and `deploy` cannot
-provide it. This is the point where root SSH is no longer required.
+provide it. This is the point where **root over SSH** is no longer required.
+
+**It is not the point where root access of any kind stops being needed.** `deploy`'s sudoers
+allowlist is deliberately four commands and nothing else (AC-SEC-3, step 2.3) -- that narrowness
+is the point of the identity, not an oversight. Several checks in step 13 need broader privileges
+than that: editing `/etc/caddy/Caddyfile` and reloading Caddy (13e's fallback), querying as the
+`postgres` role (13f), starting the retention timer and its unit (13j), and reading full service
+status or sending a signal to another user's process (13k). None of those commands are in
+`deploy`'s allowlist, and adding them would defeat AC-SEC-3 for the sake of interactive
+convenience -- **so they are performed via the DigitalOcean web console, logged in as root, not
+over the SSH session you are about to close.** Each of those steps says so again at the point
+you reach it, but the decision is made here: an earlier version of this runbook implied step 10.4
+was the last time root was needed at all, which is not true (found in review, 2026-09-10).
 
 Edit `/etc/ssh/sshd_config`, or a drop-in under `/etc/ssh/sshd_config.d/`:
 ```
@@ -481,16 +503,19 @@ systemctl restart sshd
 
 **Do not close your root session yet.** In a second terminal, confirm both of these:
 ```
-ssh deploy@<droplet-ip>          # expected: a deploy shell, no password prompt
-ssh root@<droplet-ip>            # expected: Permission denied (publickey)
+ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>   # expected: a deploy shell, no password prompt
+ssh root@<droplet-ip>                                            # expected: Permission denied (publickey)
 ```
 Only when the first succeeds *and* the second is refused, close the root session.
 
 **[HOST] AC-SEC-5** — proof: that pair of results together.
 
-> If you are locked out at this point, the DigitalOcean web console still provides root access
-> independently of SSH. That is the recovery path, and it is the reason this step is safe to
-> perform last rather than never.
+> **The DigitalOcean web console is not just a recovery path from here on -- it is the sanctioned
+> channel for every remaining root-level check in this runbook.** It authenticates independently
+> of SSH (it is a local terminal session through DigitalOcean's own infrastructure, unaffected by
+> `PermitRootLogin no`), so disabling root SSH here does not strand you: it removes one attack
+> surface (root reachable from anywhere on the internet) while leaving the operator's own access
+> intact through a channel that was never exposed to the internet in the first place.
 
 ---
 
@@ -498,18 +523,27 @@ Only when the first succeeds *and* the second is refused, close the root session
 
 Design: arch-notes §6.1, §7, §10 step 11.
 
-1. Generate the deploy keypair **on your own machine**, not the droplet:
+1. **Do not generate a new keypair here.** `./deploy_key` and `./deploy_key.pub` already exist
+   from step 0.3, and the public half is already installed on the droplet (step 2.2). Running
+   `ssh-keygen -f ./deploy_key` a second time is destructive, not idempotent: if you accept the
+   overwrite prompt, `./deploy_key` becomes a *different* private key than the one whose public
+   half is in `authorized_keys`, and the two now silently mismatch -- the deploy workflow's very
+   first SSH connection would fail with "Permission denied" and nothing before that point would
+   have told you why. If you decline the overwrite, nothing happens, which only works because you
+   declined -- an earlier version of this runbook re-issued the `ssh-keygen` command here with no
+   warning about either outcome (found in review, 2026-09-10).
+
+   Confirm the public key is installed (it should already be, from step 2.2):
    ```
-   ssh-keygen -t ed25519 -C "rosetta-chat-deploy" -f ./deploy_key -N ""
+   ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip> "cat ~/.ssh/authorized_keys"
    ```
-2. Install the **public** key into `deploy`'s `authorized_keys` on the droplet (step 2.2, if not
-   already done).
-3. In the GitHub repository settings:
+   Expected: the output matches the contents of `./deploy_key.pub` on your machine.
+2. In the GitHub repository settings:
    - Secret `DEPLOY_SSH_KEY` = the **private** key contents.
    - Variable `SITE_DOMAIN` = the value from step 0/8.
    - Variable `DEPLOY_HOST` = the droplet's public IP.
    - Variable `SSH_KNOWN_HOSTS` = the output of the next command.
-4. **Get the host key from the droplet's own console, not from your first SSH connection** — so
+3. **Get the host key from the droplet's own console, not from your first SSH connection** — so
    the workflow never trust-on-first-use's the host key. Using the DigitalOcean web console (not
    an SSH session from your laptop), logged in as root or deploy:
    ```
@@ -517,7 +551,7 @@ Design: arch-notes §6.1, §7, §10 step 11.
    ```
    Expected output form: `<DEPLOY_HOST> ssh-ed25519 AAAA...`. Paste this exact line as the
    `SSH_KNOWN_HOSTS` variable value.
-5. Delete `./deploy_key` and `./deploy_key.pub` from your machine once the secret is saved — they
+4. Delete `./deploy_key` and `./deploy_key.pub` from your machine once the secret is saved — they
    have no further use locally.
 
 **[HOST] proof this step succeeded**: no direct check yet — step 12's SSH connection from the
@@ -559,7 +593,11 @@ ls -la /srv/chat/releases/
 ls /srv/chat/releases/<the-new-release-id>/
 ```
 Expected release contents: `package.json`, `node_modules/`, `dist/server/`, `dist/client/`,
-`src/db/migrations/*.sql`, `deploy.env` (SPECS AC-CD-5). If the run failed per the first-deploy
+**`dist/db/`**, `src/db/migrations/*.sql`, `deploy.env` (SPECS AC-CD-5). `dist/db/` is
+load-bearing, not optional: `src/server/index.ts` imports from it and the retention unit's
+`ExecStart` targets `dist/db/retention.js` directly -- its absence here was the exact defect
+validation found by reconstructing this same tree (`docs/EVALUATION-SESSIONS/2026-09-08-gated-deploy.md`
+§3, defect #8), and this list should have named it from the start (found in review, 2026-09-10). If the run failed per the first-deploy
 branch above, confirm the release directory still exists on disk (nothing was deleted) and that
 `/srv/chat/current` does **not** point at it — that is the expected state: the bad release
 recorded, the symlink never flipped, the service stopped.
@@ -642,16 +680,17 @@ Replace **that entire block** (not add alongside it — replace it) with:
 This is safe because `/ws` independently requires a signed session cookie whose only issuer is
 `POST /api/join`, which stays behind the gate, and it separately enforces an `Origin` allowlist —
 an unauthenticated stranger reaching `/ws` directly gets `401` from the application itself, having
-gained nothing (arch-notes §4.4). Then:
+gained nothing (arch-notes §4.4). Then, **(root, via the DigitalOcean console -- not the `deploy` SSH session; step 10.4.)**
 ```
-caddy validate --config /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --envfile /etc/caddy/caddy.env
 systemctl reload caddy
 ```
 Expected: `Valid configuration`, then re-run the three-step browser test above. Record the final
 outcome (fallback applied, retest passed) in `agents/IMPLEMENTATION.md`.
 
 **f. The REQ-MOD-003 proof — do not abbreviate this one either.** After sending at least one
-message in step 13e, on the droplet:
+message in step 13e, on the droplet, **(root, via the DigitalOcean console -- not the `deploy` SSH session; step 10.4.)** `deploy`'s sudoers allowlist has no path to the
+`postgres` role:
 ```
 sudo -u postgres psql -d rosetta_chat -c "SELECT ip, count(*) FROM messages GROUP BY 1 ORDER BY 2 DESC LIMIT 5;"
 ```
@@ -661,7 +700,9 @@ Expected: the top row's `ip` is a **real public IP address** (yours, the one you
 only end-to-end proof that the entire point of this deploy (trusted-proxy IP capture) actually
 works.
 
-**g. No extractor warnings.**
+**g. No extractor warnings.** **(root, via the DigitalOcean console -- not the `deploy` SSH session; step 10.4.)** `deploy` is not in the `systemd-journal` group, so an
+unprivileged `journalctl` here can silently show less than the full log rather than failing loudly
+-- root avoids that ambiguity.
 ```
 journalctl -u chat --since "-15 min" | grep -i "trusted\|forwarded\|untrusted"
 ```
@@ -685,7 +726,8 @@ Expected: connection refused or timeout — **not** a successful connection. A s
 here means the loopback bind (`AC-BIND-1`) or the firewall (step 3) is not actually in effect,
 despite the service being up and reachable through Caddy.
 
-**j. Retention timer is scheduled and monitorable.**
+**j. Retention timer is scheduled and monitorable.** **(root, via the DigitalOcean console -- not the `deploy` SSH session; step 10.4.)** `deploy`'s sudoers allowlist covers
+only `chat` and `chat-migrate`, never the retention unit or timer.
 ```
 sudo systemctl start rosetta-chat-retention.timer
 systemctl list-timers rosetta-chat-retention.timer
@@ -708,7 +750,9 @@ oneshot), and `journalctl -u rosetta-chat-retention` shows one structured line w
 counts (`messagesIpNulled`, `bansIpNulled: null` — `bans` does not exist yet, guarded per SPECS
 §2.2 — and `guestsDeleted`).
 
-**k. Restart and crash-loop behavior.**
+**k. Restart and crash-loop behavior.** **(root, via the DigitalOcean console -- not the `deploy` SSH session; step 10.4.)** full `systemctl status` (as opposed to the
+narrower `is-active chat` `deploy` is permitted) and sending a signal to a process owned by
+`rosetta-chat` both fall outside `deploy`'s allowlist by design.
 ```
 sudo systemctl status chat   # note the PID
 sudo kill -9 <PID>

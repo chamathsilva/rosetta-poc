@@ -77,6 +77,18 @@ Keep template entries so that AI knows how to fill them in later on.
 - The number was cheap to re-verify at every hop (one `grep`) and was verified at none of them until a plan reviewer did.
 - Rule: a specific count, quote, or fact that crosses a document boundary must be re-derived at the new document, not copied from the document that stated it first — copying propagates an error at zero marginal cost per hop, which is exactly what makes it survive.
 
+### A runbook is verified by simulating its execution in order, not by reading it [ACTIVE]
+
+- A provisioning runbook passed an AI code review and an AI validation pass, then two separate rounds of human review each found five real, execution-blocking defects the AI passes missed entirely — ten total, zero overlap between the rounds and the AI passes.
+- Every one of the ten shares a property: it only surfaces when you track, step by step, which identity is authenticated at that point in the document and what that identity is actually permitted to do next (a keypair referenced before it exists; root access assumed available after the step that revokes it; a validation flag added in one place and never propagated to its duplicate three sections later). Reading the prose carefully does not surface this — the defect lives in the sequence, not in any single sentence.
+- Rule: treat a human-executed sequential document (a runbook, a migration guide, an incident playbook) as its own review class. Verify it by simulating execution — walk it step by step as the stated operator, tracking identity and permission state transition by transition — not by reading it as prose, and not by the same code-review or validation method used on source files.
+
+### A ref-diff is only as trustworthy as the fetch that populated the ref [ACTIVE]
+
+- After one merge landed a commit behind the fix it was meant to include, the stated fix was "diff the destination branch against the specific commit SHA believed merged." Applying that method to the next merge produced a false negative: the fix appeared absent from `develop`.
+- Root cause: the verification's own `git fetch` had failed silently (`Permission denied (publickey)`, an unrelated SSH credential issue in the shell), and its exit code was not checked before the ref it was supposed to update was trusted. The diff was accurate — it just compared against a stale local ref, not against `develop`'s real state.
+- Rule: a verification step that depends on a prior fetch, pull, or sync succeeding must check that step's exit code before trusting anything derived from it. Prefer a verification path with an independent trust root (here, reading the file via the GitHub API with `gh`'s own credentials) when the primary path's own preconditions are exactly what a previous failure already put in doubt.
+
 ## What Worked
 
 ### Orchestrator review of subagent output caught what the phase checklist did not [ACTIVE]

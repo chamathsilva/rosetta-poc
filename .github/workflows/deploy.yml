@@ -1,0 +1,426 @@
+# Gated-launch deploy workflow — B5 of plans/gated-deploy/GATED-DEPLOY-PLAN.md.
+#
+# Design: plans/gated-deploy/architecture-notes.md §3 (why the runner builds
+# instead of consuming CI's artifact, and the ubuntu-24.04 pin), §6
+# (secrets placement), §7 (deploy identity), §8 (deploy order, failure
+# tables, rollback), §9 (migration-failure semantics).
+# Contract: plans/gated-deploy/GATED-DEPLOY-SPECS.md §2.3, §3.3, §3.7, §3.8.
+#
+# `workflow_dispatch` is the ONLY trigger — [S], settled, not re-argued
+# here. A human picks a ref and presses the button; nothing else may ship
+# to this host. Do not add `push`, `workflow_run`, or a schedule.
+#
+# This workflow builds on the runner and never makes the droplet contact
+# the npm registry (arch-notes §3.1, §3.4) — the opposite of CI's build
+# job, which exists only as a merge gate, not as this workflow's input
+# (arch-notes §3.2: `workflow_dispatch` is ref-centric, so consuming a
+# cross-run artifact would insert a human-transcription or third-party-
+# resolver step between "what was pressed" and "what ships" — rejected).
+#
+# This workflow CANNOT be executed until a droplet is provisioned and
+# `docs/RUNBOOK-gated-deploy.md` steps 0-11 are complete (PLAN B8). Nothing
+# in this file has been run. Every behavioural claim below names the
+# runbook step that proves it.
+on:
+  workflow_dispatch: {}
+
+# Deploying is ref-centric by design (arch-notes §3.2) - no inputs beyond
+# the ref GitHub already carries for a dispatch.
+
+permissions:
+  contents: read
+  # Needed only so the precondition step below can read check-runs for the
+  # dispatched SHA - no other permission is requested. In particular no
+  # `actions: read`: this workflow never calls `download-artifact` and
+  # never reads another run's artifacts (arch-notes §3.2 "secondary
+  # benefits").
+  checks: read
+
+# cancel-in-progress: false is DELIBERATE and the OPPOSITE of
+# .github/workflows/ci.yml's cancel-in-progress: true (ci.yml:19-21). Do
+# not "fix" this for consistency - a deploy cancelled mid symlink-flip is
+# worse than a queued second dispatch waiting its turn (arch-notes §8.5).
+concurrency:
+  group: deploy-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    # Pinned, NOT ubuntu-latest (arch-notes §3.4). A moving runner label
+    # eventually carries a newer glibc than the Ubuntu 24.04 droplet's; a
+    # native module (bcrypt) resolved against that newer glibc can fail to
+    # load only at service start on the host, after a fully green build,
+    # with nothing in this repository having changed. ci.yml may stay on
+    # `ubuntu-latest` because it ships nothing to a host.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+
+    steps:
+      # ---------------------------------------------------------------
+      # 0. Checkout the dispatched ref. Read-only, no host contact yet.
+      # ---------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # ---------------------------------------------------------------
+      # 1. PRECONDITION - refuse to deploy a commit whose CI is not
+      #    green. Must run, and fail, BEFORE anything below touches the
+      #    droplet (AC-CD-4). `workflow_dispatch` alone does not know
+      #    whether CI passed for the chosen ref (arch-notes §3.2) - this
+      #    step is the six-line guard that closes that gap.
+      #
+      #    Uses the `gh` CLI (preinstalled on GitHub-hosted runners, not a
+      #    marketplace Action) against the Checks API - no third-party
+      #    action anywhere in this file (AC-CD-3).
+      # ---------------------------------------------------------------
+      - name: Verify CI is green for the dispatched commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          echo "Checking CI check-runs for $SHA on $GH_REPO"
+
+          RUNS_JSON="$(gh api "repos/$GH_REPO/commits/$SHA/check-runs" --paginate)"
+
+          # Must match .github/workflows/ci.yml's job `name:` fields
+          # exactly - these are what GitHub reports as check-run names.
+          MISSING="$(printf '%s\n' "$RUNS_JSON" | jq -r '
+            ["Lint and typecheck", "Tests (PostgreSQL 17)", "Build"] as $required
+            | ($required - ([.check_runs[]
+                | select(.conclusion == "success" and .status == "completed")
+                | .name]))
+            | if length > 0 then join(", ") else "" end
+          ')"
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::CI is not green for $SHA - missing/failed required check(s): $MISSING" >&2
+            echo "Refusing to deploy an unverified commit. No host has been contacted." >&2
+            exit 1
+          fi
+
+          echo "CI is green for $SHA - proceeding to build and deploy."
+
+      # ---------------------------------------------------------------
+      # 2. Build on the runner. The droplet never builds (arch-notes
+      #    §3.1, [S]) and cannot: it installs with --omit=dev, and
+      #    React/Vite are devDependencies (docs/ARCHITECTURE.md "Client
+      #    build").
+      # ---------------------------------------------------------------
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies (full, needed to build)
+        run: npm ci --ignore-scripts
+
+      - name: Build server and client
+        run: npm run build
+
+      # AC-CD-7: production install uses --omit=dev --ignore-scripts.
+      # Sequence per arch-notes §3.4: full ci -> build -> drop
+      # node_modules -> reinstall prod-only. bcrypt@6 ships prebuildify
+      # binaries in the tarball (no install script needed on any
+      # platform), so --ignore-scripts here is safe, not a compromise.
+      - name: Install production dependencies only
+        run: |
+          set -euo pipefail
+          rm -rf node_modules
+          npm ci --omit=dev --ignore-scripts
+
+      # ---------------------------------------------------------------
+      # 3. Assemble a self-contained release directory (arch-notes §3.5).
+      #    Every file here is load-bearing at process start - see the
+      #    comments per line. `package.json` at the release root is the
+      #    one most likely to be silently omitted: dist/server/*.js is
+      #    emitted as ESM (tsconfig.json "module": "nodenext") and Node
+      #    resolves module type from the NEAREST package.json, which is
+      #    this one ("type": "module"). Ship the release without it and
+      #    the service dies at its first `import` with "Cannot use import
+      #    statement outside a module".
+      # ---------------------------------------------------------------
+      - name: Assemble release directory
+        run: |
+          set -euo pipefail
+
+          RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}"
+          echo "RELEASE_ID=$RELEASE_ID" >> "$GITHUB_ENV"
+          RELDIR="$RUNNER_TEMP/release"
+          echo "RELDIR=$RELDIR" >> "$GITHUB_ENV"
+
+          mkdir -p "$RELDIR/dist" "$RELDIR/src/db"
+
+          # NOTE: mkdir -p above only creates the parent - dist/db itself is
+          # created by the cp -r below, same pattern as dist/server/client.
+
+          # Required at the release root so Node resolves ESM correctly
+          # (see step comment above).
+          cp package.json "$RELDIR/"
+
+          # Production node_modules built above - this is what makes the
+          # release self-contained; the droplet never runs npm install.
+          cp -r node_modules "$RELDIR/node_modules"
+
+          # dist/client MUST sit next to dist/server - src/server/index.ts
+          # resolves it as path.join(import.meta.dirname, '../client').
+          cp -r dist/server "$RELDIR/dist/server"
+          cp -r dist/client "$RELDIR/dist/client"
+
+          # dist/db is REQUIRED at runtime, not optional: src/server/index.ts
+          # imports ../db/pool.js and ../db/queries/rooms.js, which resolve
+          # here; rosetta-chat-retention.service's ExecStart also targets
+          # dist/db/retention.js directly. Omitting this compiles clean,
+          # passes every AC that doesn't name this exact path, and crashes
+          # the service at first start with ERR_MODULE_NOT_FOUND - found by
+          # validation 2026-09-09 reconstructing this exact release tree and
+          # running it, not by reading this file.
+          cp -r dist/db "$RELDIR/dist/db"
+
+          # chat-migrate.service's ExecStart runs node-pg-migrate with
+          # `-m src/db/migrations`, source-tree-relative plain .sql files -
+          # ship them as such, not compiled.
+          cp -r src/db/migrations "$RELDIR/src/db/migrations"
+
+          # Release-scoped, non-secret config (arch-notes §4.7, §6.1).
+          # DATABASE_URL and JWT_SECRET live ONLY in the host-scoped
+          # /etc/rosetta-chat/secrets.env and are never generated here
+          # (AC-CD-12). No trailing slash on ALLOWED_ORIGIN - one is a 403
+          # on every WebSocket upgrade (.env.example, arch-notes §1.6).
+          printf 'ALLOWED_ORIGIN=https://%s\nPORT=3000\nNODE_ENV=production\n' \
+            "$SITE_DOMAIN" > "$RELDIR/deploy.env"
+
+          echo "Assembled release $RELEASE_ID:"
+          find "$RELDIR" -maxdepth 2 | sort
+
+      # ---------------------------------------------------------------
+      # 4. Reach the droplet. Deploy identity is the unprivileged
+      #    `deploy` user (arch-notes §7) - never root, never
+      #    `rosetta-chat`. The private key and known_hosts entry live
+      #    only in this job's runner filesystem, which is destroyed with
+      #    the runner.
+      # ---------------------------------------------------------------
+      - name: Configure SSH for the deploy identity
+        # Secrets arrive as environment variables, NOT interpolated into the
+        # script body. GitHub expands ${{ }} into the shell source text
+        # before bash parses it, so a value containing newlines or shell
+        # metacharacters - and an SSH private key is multi-line by
+        # definition - can alter the script itself. Via env: the value is
+        # only ever data. Flagged by SonarCloud on PR #9, 2026-09-09.
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          # Pinned at runbook step 11 from `ssh-keyscan` run on the
+          # droplet console, not from a first connection here - so this
+          # workflow never TOFU-trusts the host key (arch-notes §10 step 11).
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+          {
+            echo "SSH_OPTS=-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload release to the droplet
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "deploy@$DEPLOY_HOST" "mkdir -p /srv/chat/releases/$RELEASE_ID"
+          rsync -az --delete -e "ssh $SSH_OPTS" \
+            "$RELDIR/" "deploy@$DEPLOY_HOST:/srv/chat/releases/$RELEASE_ID/"
+
+      # ---------------------------------------------------------------
+      # 5. The stateful part: bcrypt smoke -> stop -> flip -> migrate ->
+      #    start -> health, with rollback on failure at steps 5-7
+      #    (arch-notes §8.1, §8.2). Written as one script executed in a
+      #    single SSH session so its shell state (PREVIOUS_RELEASE,
+      #    FIRST_DEPLOY) survives across the whole sequence - splitting
+      #    this into separate `ssh` calls per command would lose that
+      #    state and make the rollback branches impossible to express
+      #    correctly.
+      #
+      #    The script is generated into the RUNNER's temp directory at
+      #    run time (never committed - this file is this batch's only
+      #    owned artifact) and copied to a /tmp path on the droplet that
+      #    is removed after use.
+      #
+      #    Every `sudo` command below is one of the deploy user's exact
+      #    four allow-listed sudoers commands (arch-notes §7): `systemctl
+      #    stop chat`, `systemctl start chat`, `systemctl start
+      #    chat-migrate`, `systemctl is-active chat`. No wildcard, nothing
+      #    else.
+      # ---------------------------------------------------------------
+      - name: Write the remote deploy script
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/remote-deploy.sh" <<'REMOTE_SCRIPT_EOF'
+          #!/usr/bin/env bash
+          # Generated by .github/workflows/deploy.yml - do not edit on the
+          # host, it is discarded after every run.
+          set -euo pipefail
+
+          RELEASE_ID="$1"
+          RELEASES_DIR="/srv/chat/releases"
+          NEW_RELEASE="$RELEASES_DIR/$RELEASE_ID"
+          CURRENT_LINK="/srv/chat/current"
+
+          echo "== [1] bcrypt smoke test on the new release, before anything is stopped =="
+          # arch-notes §3.4: closes the native-module-glibc question
+          # mechanically, on the real host, before the running service is
+          # touched. Run with cwd = the new release so node resolves
+          # node_modules relative to it, exactly as the service will.
+          if ! (cd "$NEW_RELEASE" && node -e "require('bcrypt').hashSync('x', 12)"); then
+            echo "FATAL: bcrypt failed to load in $NEW_RELEASE - native module/glibc mismatch." >&2
+            echo "Nothing was stopped, nothing was flipped. Deleting the bad release; the current release (if any) is untouched and still serving." >&2
+            rm -rf "$NEW_RELEASE"
+            exit 1
+          fi
+
+          # AC-ROL-7: the first deploy has no prior release to roll back
+          # to. B8 IS the first deploy, so this branch is not hypothetical.
+          PREVIOUS_RELEASE=""
+          FIRST_DEPLOY=false
+          if [ -L "$CURRENT_LINK" ]; then
+            PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
+            echo "Previous release: $PREVIOUS_RELEASE"
+          else
+            FIRST_DEPLOY=true
+            echo "No 'current' symlink exists yet - this is the FIRST DEPLOY. There is no rollback target."
+          fi
+
+          # Any failure from here on (migrate/start/health) calls this.
+          # First-deploy branch (AC-ROL-7): stop, do not flip anywhere,
+          # say so explicitly, exit non-zero. Non-first-deploy branch
+          # (AC-ROL-2/3): flip current back to the previous release,
+          # restart it, and STILL exit non-zero (arch-notes §8.3 - a
+          # silent auto-rollback would hide a broken release).
+          rollback() {
+            local reason="$1"
+            echo "FATAL: $reason" >&2
+            if [ "$FIRST_DEPLOY" = true ]; then
+              echo "FATAL: first deploy - no rollback target existed. Stopping the service and leaving the site down rather than guessing." >&2
+              sudo systemctl stop chat || true
+              exit 1
+            fi
+            echo "Rolling back: stopping chat, flipping current back to $PREVIOUS_RELEASE, restarting." >&2
+            echo "Rollback never runs a down migration (arch-notes §8.3) - schema is left forward." >&2
+            sudo systemctl stop chat || true
+            # Guarded like the primary flip (step [3] below) - this is the
+            # path that runs when everything else has already failed, so it
+            # is the one place a silent `set -e` exit would be worst. Found
+            # by code review 2026-09-09: this flip-back had no guard while
+            # the primary flip three lines below always did.
+            if ! ( ln -sfn "$PREVIOUS_RELEASE" "$RELEASES_DIR/current.tmp" && mv -T "$RELEASES_DIR/current.tmp" "$CURRENT_LINK" ); then
+              echo "FATAL: rollback's own flip-back to $PREVIOUS_RELEASE failed. 'current' is now in an UNKNOWN state - it may still point at the broken $NEW_RELEASE, or at neither release. The chat service is STOPPED. This requires manual intervention on the droplet: inspect $CURRENT_LINK, point it at a known-good release by hand, then 'sudo systemctl start chat'." >&2
+              exit 1
+            fi
+            sudo systemctl start chat
+            echo "Rollback complete - service restored to $PREVIOUS_RELEASE. This run still exits non-zero." >&2
+            exit 1
+          }
+
+          echo "== [2] stop chat (old release, if any, still on disk and unaffected) =="
+          sudo systemctl stop chat
+
+          echo "== [3] flip current -> $NEW_RELEASE (mv -T: atomic, unlike ln -sfn onto an existing link) =="
+          # AC-ROL-8: a flip failure here happens BEFORE migration starts
+          # and before the symlink has moved (mv -T is all-or-nothing), so
+          # "current" still names the previous release (or nothing, on a
+          # first deploy). The correct recovery is a plain restart, not a
+          # rollback flip - there is nothing to flip back from.
+          if ! ( ln -sfn "$NEW_RELEASE" "$RELEASES_DIR/current.tmp" && mv -T "$RELEASES_DIR/current.tmp" "$CURRENT_LINK" ); then
+            echo "FATAL: symlink flip to $NEW_RELEASE failed." >&2
+            if [ "$FIRST_DEPLOY" = true ]; then
+              echo "FATAL: first deploy - no previous release exists to restart. No rollback target existed. Site is left down." >&2
+              exit 1
+            fi
+            echo "Restarting the previous release ($PREVIOUS_RELEASE) - 'current' never moved." >&2
+            sudo systemctl start chat
+            exit 1
+          fi
+
+          echo "== [4] run migrations via the chat-migrate oneshot unit (before chat starts - [S]) =="
+          # NOT ExecStartPre, NOT an inline `npm run migrate` over SSH -
+          # this is the unit B4 wrote (deploy/systemd/chat-migrate.service),
+          # run under exactly the service's identity and env files
+          # (arch-notes §5.2). `systemctl start` on a oneshot unit blocks
+          # until completion and returns non-zero on failure.
+          # Migration failure (arch-notes §9): node-pg-migrate defaults to
+          # a single transaction, so a failure here leaves the schema and
+          # pgmigrations bookkeeping exactly as they were - nothing to
+          # repair, only to roll back to.
+          if ! sudo systemctl start chat-migrate; then
+            rollback "migrations failed (chat-migrate). Database is unchanged (single-transaction default, arch-notes §9) - see journalctl -u chat-migrate on the host."
+          fi
+
+          echo "== [5] start chat =="
+          if ! sudo systemctl start chat; then
+            rollback "chat.service failed to start - see journalctl -u chat on the host."
+          fi
+
+          echo "== [6] health poll, loopback, up to ~62s (must exceed the ~30s idle-timer exit path - arch-notes §5.4) =="
+          # systemctl start returning 0 with Type=exec proves the binary
+          # ran, not that it is listening: a startup failure occurring
+          # after the pg pool opens a connection keeps the event loop
+          # alive on the pool's 30s idleTimeoutMillis before the process
+          # exits. This loop must outlast that.
+          healthy=false
+          for i in $(seq 1 31); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$healthy" != true ]; then
+            rollback "health check did not pass within the poll window - service is running but not answering on loopback."
+          fi
+
+          echo "== [7] prune old releases, keep the last 3 (arch-notes §8, AC-ROL-5) =="
+          ( cd "$RELEASES_DIR" && ls -1dt -- */ 2>/dev/null | tail -n +4 | xargs -r rm -rf -- )
+
+          echo "Deploy of $RELEASE_ID succeeded on the host. External gate assertion runs next, from the runner."
+          REMOTE_SCRIPT_EOF
+          chmod +x "$RUNNER_TEMP/remote-deploy.sh"
+
+      - name: Run the deploy sequence on the droplet
+        run: |
+          set -euo pipefail
+          REMOTE_PATH="/tmp/rosetta-chat-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+          scp $SSH_OPTS "$RUNNER_TEMP/remote-deploy.sh" "deploy@$DEPLOY_HOST:$REMOTE_PATH"
+          # Always clean up the temp script, but preserve and propagate the
+          # deploy script's own exit code - a rollback or a first-deploy
+          # stop must still fail this step and therefore this run.
+          ssh $SSH_OPTS "deploy@$DEPLOY_HOST" \
+            "bash '$REMOTE_PATH' '$RELEASE_ID'; status=\$?; rm -f '$REMOTE_PATH'; exit \$status"
+
+      # ---------------------------------------------------------------
+      # 6. External assertion (step 8 of arch-notes §8.1). Deliberately
+      #    OUTSIDE the remote script and run with no rollback path: per
+      #    arch-notes §8.2 row 8, a wrong result here means the app is
+      #    healthy on loopback and Caddy/DNS/the gate is not - rolling
+      #    back the application would not fix that and would discard a
+      #    good release. The workflow still fails red.
+      # ---------------------------------------------------------------
+      - name: External assertion — unauthenticated request must return 401
+        run: |
+          set -euo pipefail
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://${SITE_DOMAIN}/")"
+          echo "https://${SITE_DOMAIN}/ -> HTTP $CODE"
+          if [ "$CODE" != "401" ]; then
+            echo "::error::Expected 401 (the Caddy basic-auth gate) but got '$CODE'." >&2
+            echo "Per architecture-notes.md §8.2 row 8 this is NOT an application rollback case: the service is healthy on loopback and was left running. Investigate DNS/TLS/Caddy per §4.6 - do not roll back the release for this." >&2
+            exit 1
+          fi
+          echo "Gate check passed."

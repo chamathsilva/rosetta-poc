@@ -1,0 +1,39 @@
+# rosetta-chat-retention.service — the 30-day/24h data-retention sweep
+# (docs/TODO.md retention item; docs/ARCHITECTURE.md "Retention rule").
+#
+# Design: plans/gated-deploy/GATED-DEPLOY-SPECS.md §2.2. Triggered by
+# rosetta-chat-retention.timer, never run standalone in production.
+#
+# HOST/RELEASE SPLIT (deliberate, arch-notes §4.7 pattern applied here):
+# this unit file is HOST-scoped (/etc/systemd/system, installed once by
+# the runbook), but ExecStart targets a RELEASE-scoped path through the
+# /srv/chat/current symlink, with NO ARGUMENTS. This unit is a stable host
+# contract: one fixed path, no arguments, so a future release can change
+# retention logic (cutoffs, statement order, the guarded `bans` branch)
+# without any host edit. Changing the executable PATH or adding arguments
+# is a host change and requires a runbook step + `daemon-reload`.
+#
+# Consequence, accepted: rolling back below the release that introduced
+# src/db/retention.ts leaves this unit pointing at a missing file, so it
+# fails LOUDLY on its next scheduled run (visible as a `failed` unit in
+# `systemctl list-timers` / `systemctl status`) rather than silently doing
+# nothing.
+#
+# The script itself performs the one-transaction, three-statement sweep
+# (messages.ip -> NULL, bans.ip -> NULL [guarded on relation existence],
+# DELETE guests) and MUST call pool.end() before exit, or the process
+# hangs ~30s on the pool's idleTimeoutMillis and this "oneshot" unit stops
+# looking instantaneous.
+
+[Unit]
+Description=Rosetta POC chat — data retention sweep (IP erasure, guest reap)
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=rosetta-chat
+Group=rosetta-chat
+WorkingDirectory=/srv/chat/current
+EnvironmentFile=/etc/rosetta-chat/secrets.env
+EnvironmentFile=/srv/chat/current/deploy.env
+ExecStart=/usr/bin/node /srv/chat/current/dist/db/retention.js

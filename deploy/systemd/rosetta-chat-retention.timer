@@ -1,0 +1,33 @@
+# rosetta-chat-retention.timer — fires rosetta-chat-retention.service
+# daily.
+#
+# Design: plans/gated-deploy/GATED-DEPLOY-SPECS.md §2.2, AC-RET-10/11.
+#
+# Persistent=true is load-bearing, not a default-safety habit: without it,
+# a droplet that happens to be powered off (or the unit disabled) at the
+# scheduled time SILENTLY skips that day's run entirely, which is exactly
+# the class of quiet failure this design otherwise spends effort
+# eliminating (SPECS §6, "its natural failure mode is silent"). With it,
+# a missed run fires once at the next boot/reload instead of being
+# skipped.
+#
+# Daily granularity on a 30-day retention rule means worst-case retention
+# is 30 days + <24h, i.e. <=31 days — accepted by the user 2026-09-08
+# (SPECS AC-RET-11) as satisfying docs/ARCHITECTURE.md's 30-day promise.
+# Tightening this is a one-line OnCalendar change if that acceptance ever
+# changes.
+#
+# Monitorability: `systemctl list-timers rosetta-chat-retention.timer`
+# shows next/last run; a failed sweep surfaces as a `failed` unit via
+# `systemctl status rosetta-chat-retention.service` — the "one thing to
+# monitor" the retention task was required to produce.
+
+[Unit]
+Description=Daily timer for the chat data-retention sweep
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

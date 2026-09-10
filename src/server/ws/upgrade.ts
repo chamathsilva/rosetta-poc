@@ -13,6 +13,7 @@ import type { Server } from 'node:http';
 import type { Socket } from 'node:net';
 import type { WebSocketServer } from 'ws';
 import { SESSION_COOKIE, verifySessionToken, decodeExpiry, type SessionClaims } from '../session.js';
+import { extractClientIp } from '../net/client-ip.js';
 
 /** Per-connection context, captured at handshake and passed through the
  * 'connection' event — never written onto the socket as an ad-hoc property
@@ -92,7 +93,7 @@ export function attachUpgradeHandler(
     const context: ConnectionContext = {
       claims,
       exp,
-      ip: req.socket.remoteAddress,
+      ip: extractClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']),
     };
 
     wss.handleUpgrade(req, socket, head, (ws) => {

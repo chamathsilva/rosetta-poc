@@ -21,7 +21,7 @@ const REGISTERED_TTL = '30d';
 // one source, two units. A registered-session maxAge constant is not
 // declared here: guest upgrade is out of scope for this feature and an
 // unused constant would fail lint.
-const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
+export const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const SESSION_COOKIE = 'session';
 

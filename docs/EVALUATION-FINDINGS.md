@@ -1,8 +1,8 @@
 # Evaluation Findings — Rosetta
 
-**Status: INTERIM.** Covers `init-workspace-flow`, one no-workflow session, one `adhoc-flow` run, and one **complete** `coding-flow` run (the walking skeleton — all 13 phases, committed as `b57ed9a`, PR #2 open against `main`). Does **not** cover the no-Rosetta DM baseline, which has not run. **No comparison exists yet**: everything here characterizes Rosetta's own process, observed once, on one feature, with one set of models. Generalize cautiously.
+**Status: INTERIM.** Covers `init-workspace-flow`, one no-workflow session, one `adhoc-flow` run, one **complete** `coding-flow` run (the walking skeleton — all 13 phases, committed as `b57ed9a`, PR #2 open against `main`), and two chunks from 2026-09-08/09 that are **recorded but not yet synthesized here**: CI and automated code review, and the gated-deploy preparation. Their evidence is in `docs/EVALUATION-SESSIONS/` and awaits folding into the themes below. Does **not** cover the no-Rosetta DM baseline, which has not run. **No comparison exists yet**: everything here characterizes Rosetta's own process, observed once, on one feature, with one set of models. Generalize cautiously.
 
-Raw per-run cost data lives in `docs/EVALUATION-LOG.md`. This document is the cross-run synthesis, organized by theme.
+**Start at `docs/EVALUATION-METHOD.md`** for how evidence is captured and where each kind lives. This document is layer 4 of 4: the **cross-run synthesis**, organized by theme rather than chronology — it argues. The record it argues from is `docs/EVALUATION-SESSIONS/*.md` (what happened, per chunk) and `docs/EVALUATION-LOG.md` (what it cost).
 
 **Counting basis for "findings":** a finding is one numbered item raised at a HITL gate, at any severity (P1, P2, or minor). Where a round's items are counted differently below, it is stated.
 

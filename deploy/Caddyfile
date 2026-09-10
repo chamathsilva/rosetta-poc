@@ -1,0 +1,87 @@
+# Caddyfile — gated-launch reverse proxy.
+#
+# Design: plans/gated-deploy/architecture-notes.md §4. Do not restate
+# rationale here; this file is the artifact, not the record.
+#
+# {$VAR} substitution happens before Caddyfile parsing (Caddy v2,
+# https://caddyserver.com/docs/caddyfile/concepts). Values are supplied by
+# /etc/caddy/caddy.env (root:caddy, 0640) via a systemd EnvironmentFile
+# drop-in on caddy.service — set up by the runbook, not here.
+#
+# Required variables, all placeholders — the runbook fills these in on the
+# host, never in this repo (arch-notes §4.2, §6):
+#   ACME_EMAIL   - contact address for Let's Encrypt / ZeroSSL
+#   SITE_DOMAIN  - the DuckDNS (gated phase) or real (public phase) hostname
+#   GATE_USER    - basic-auth username, plaintext (low sensitivity)
+#   GATE_HASH    - basic-auth password HASH ONLY, generated on the droplet
+#                  with `caddy hash-password` (arch-notes §6.2). NEVER a
+#                  plaintext password.
+#
+# Before every reload: `caddy validate --config /etc/caddy/Caddyfile`
+# (runbook step 9 — cannot be run on this darwin dev box, no Caddy binary
+# here; AC-CAD-4 is [HOST]-only).
+
+{
+    email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+    encode zstd gzip
+
+    # === GATE — delete this block at public launch. Nothing else changes. ===
+    # Removable by config change alone (docs/ARCHITECTURE.md "Pre-moderation
+    # gate", docs/CONTEXT.md "Staged launch"): delete this block, run
+    # `caddy validate`, then `systemctl reload caddy`. No application
+    # change, no redeploy, no restart of the Node process (arch-notes §4.5).
+    basic_auth {
+        {$GATE_USER} "{$GATE_HASH}"
+    }
+    # === END GATE ===
+
+    # --- Pre-authorised fallback (arch-notes §4.4) — DO NOT ENABLE BY DEFAULT ---
+    # A browser cannot set headers on a WebSocket handshake, and Chrome
+    # never presents an auth dialogue for one; whether cached basic-auth
+    # credentials get replayed onto the handshake is browser-dependent and
+    # not guaranteed. There are documented cases of basic auth on a reverse
+    # proxy blocking WebSocket upgrades with a 401 the application never
+    # sees. This fallback exempts only /ws from the gate above.
+    #
+    # It is SAFE to enable because /ws independently requires a signed
+    # session cookie (src/server/ws/upgrade.ts) whose only issuer is
+    # POST /api/join — which stays behind the gate — and it separately
+    # enforces the Origin allowlist before touching the cookie. An
+    # unauthenticated stranger reaching /ws gets 401 from the application,
+    # having gained nothing.
+    #
+    # ENABLE ONLY IF: runbook step 13e (the WebSocket-through-the-gate
+    # browser test, run against the real gated host) FAILS. Do not enable
+    # speculatively — it is pre-authorised, not pre-applied. If you enable
+    # it, replace the `basic_auth` block above with the two lines below
+    # (they must be exclusive of each other — the plain `basic_auth {...}`
+    # block gates everything including /ws; this pair gates everything
+    # EXCEPT /ws) and record the outcome in agents/IMPLEMENTATION.md.
+    #
+    # @notws not path /ws
+    # basic_auth @notws {
+    #     {$GATE_USER} "{$GATE_HASH}"
+    # }
+    # --- END fallback ---
+
+    # header_up REPLACES the header (overwrites any client-supplied value).
+    # `+ X-Forwarded-For` would APPEND instead, producing
+    # "<attacker-value>, <real-peer>" — the extractor in
+    # src/server/net/client-ip.ts still defends against that by taking the
+    # last comma-separated value, but this repo sends exactly one value so
+    # the chain is verifiable by eye (arch-notes §1.6).
+    #
+    # CONTRACT WITH src/server/net/client-ip.ts: this line sends the real
+    # TCP peer address as the SOLE value of X-Forwarded-For, to a Node
+    # process that only trusts that header when its own immediate peer is
+    # loopback (127.0.0.1 / ::1 / ::ffff:127.0.0.1) — true here because
+    # Caddy and Node are co-located on one droplet. If the extractor's
+    # trusted-peer set or its "trust the header at all" condition changes,
+    # this comment and that file go stale together — check both.
+    reverse_proxy 127.0.0.1:3000 {
+        header_up X-Forwarded-For {http.request.remote.host}
+    }
+}

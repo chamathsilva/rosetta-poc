@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc -p tsconfig.json && find dist/server -name '*.test.js' -delete",
+    "build:server": "tsc -p tsconfig.json && find dist -name '*.test.js' -o -name '*.test.js.map' | xargs rm -f",
     "build:client": "NODE_ENV=production vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "start": "node dist/server/index.js",

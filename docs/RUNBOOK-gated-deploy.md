@@ -31,14 +31,46 @@ cited section before continuing.
 
 Do not start step 1 until every row here is filled in and true.
 
+### 0.1 The droplet — create it with these exact options
+
+G4 authorises provisioning; this table is what to provision. These are compatibility-critical: the
+release is built on a GitHub runner pinned to `ubuntu-24.04` and shipped as compiled output plus a
+prebuilt native module, so an image or architecture mismatch fails at first service start, after
+everything else has succeeded (arch-notes §3.4).
+
+| Creation option | Required value | Why it is not free choice |
+|---|---|---|
+| Image | **Ubuntu 24.04 LTS x64** | The deploy runner is pinned to `ubuntu-24.04`. A newer image moves the droplet's glibc ahead of the runner's; an older one moves it behind. `bcrypt` ships a prebuilt `linux-x64` binary resolved against glibc. |
+| Architecture | **x86-64 (Intel/AMD "Regular" or "Premium")** — **not** ARM | `bcrypt`'s prebuild set is chosen per architecture; the runner builds x64. |
+| Plan | **Basic, $6/mo — 1 GB RAM / 1 vCPU / 25 GB SSD** | `docs/ARCHITECTURE.md` "Deployment topology". The $12/2 GB upgrade path is pre-decided if memory pressure appears, so it is not re-argued under load. |
+| Region / data location | **Your choice, recorded here → ______** | Not technically constrained, but it determines where user messages and IP addresses physically reside. Record it: `docs/CONTEXT.md` commits to a published abuse contact and a retention promise, and both are jurisdictional questions later. |
+| Authentication | **SSH key at creation. Not a password.** | Step 2 disables password auth outright; creating with a password means a window where it is enabled, and a credential that then lingers. |
+| Swap | **2 GB, added in step 1** | Not a creation option on DigitalOcean — you add it yourself. `docs/ARCHITECTURE.md` treats it as part of the 1 GB plan's viability, not an optional extra. |
+| Backups / monitoring add-ons | **Neither** | Out of scope by decision (arch-notes §11). Do not enable them expecting them to satisfy the backup obligation — that obligation is a tested `pg_dump` restore, which does not exist yet. |
+
+### 0.2 Everything else, before step 1
+
 | Item | Value / confirmation |
 |---|---|
-| Droplet created (DigitalOcean, $6/mo plan per `docs/ARCHITECTURE.md` "Deployment topology") | |
-| Root SSH reachable from your machine right now | |
+| Droplet created per 0.1, root SSH reachable from your machine right now | |
+| **Deploy keypair generated on your own machine** (see 0.3 — step 2 installs the public half, step 11 uploads the private half) | |
 | Chosen `SITE_DOMAIN` (a DuckDNS subdomain for the gated phase) | |
-| DuckDNS account created, token in hand | |
+| DuckDNS account created, token in hand, subdomain pointed at the droplet's IP | |
 | GitHub repository admin access (to set secrets/variables and merge to `develop`) | |
-| `deploy/gated-deploy` batches B1–B7 merged to `develop` — **`deploy.yml` must be on the default branch or the dispatch button will not exist** (SPECS §5.3) | |
+| Batches B1–B7 merged to `develop` — **`deploy.yml` must be on the default branch or the dispatch button will not exist** (SPECS §5.3) | |
+| A second terminal window available (step 2 needs one open while the first stays connected) | |
+
+### 0.3 Generate the deploy keypair now — step 2 cannot be completed without it
+
+On **your own machine**, never on the droplet:
+```
+ssh-keygen -t ed25519 -C "rosetta-chat-deploy" -f ./deploy_key -N ""
+```
+Produces `./deploy_key` (private — becomes the `DEPLOY_SSH_KEY` GitHub secret in step 11) and
+`./deploy_key.pub` (public — pasted into the droplet in step 2.2).
+
+Keep `./deploy_key` until step 11 is done, then delete your local copy. It is a credential with
+deploy rights to production.
 
 ---
 
@@ -76,7 +108,7 @@ can touch secrets or restart itself.
    ```
    adduser --disabled-password --gecos "" deploy
    mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
-   # paste the CI public key (generated in step 11) into:
+   # paste the contents of ./deploy_key.pub from step 0.3 into:
    nano /home/deploy/.ssh/authorized_keys
    chmod 600 /home/deploy/.ssh/authorized_keys
    chown -R deploy:deploy /home/deploy/.ssh
@@ -96,22 +128,24 @@ can touch secrets or restart itself.
    `ls /home/rosetta-chat/.ssh` does not exist (no home dir at all); `sudo -l -U rosetta-chat`
    reports it is not in sudoers.
 
-4. **Disable root SSH and password auth** (`/etc/ssh/sshd_config` or a drop-in under
-   `/etc/ssh/sshd_config.d/`):
-   ```
-   PermitRootLogin no
-   PasswordAuthentication no
-   ```
-   ```
-   systemctl restart sshd
-   ```
-   **Before closing your current root session**, open a **second terminal** and confirm:
+4. **Confirm `deploy` can log in — but do not disable root SSH yet.**
+
+   Open a **second terminal** and confirm:
    ```
    ssh deploy@<droplet-ip>
    ```
-   Expected: you land in a `deploy` shell with no password prompt. Only after this succeeds, close
-   the first (root) session. **[HOST] AC-SEC-5** — proof: this successful second-terminal login,
-   plus `ssh root@<droplet-ip>` from your machine now refusing (`Permission denied`).
+   Expected: you land in a `deploy` shell with no password prompt.
+
+   > **Keep your root session open. Do not harden SSH here.**
+   > Steps 3–10 require unrestricted root — installing packages, editing PostgreSQL config,
+   > writing files under `/etc`. The `deploy` user **cannot** do any of it: its sudoers allowlist
+   > is exactly the four `systemctl` commands above, by design (AC-SEC-3). Disabling root SSH at
+   > this point would strand you between step 3 and step 10 with no path to root except the
+   > DigitalOcean web console.
+   >
+   > SSH hardening is therefore **step 10.4**, after the last root-only work. This is a correction:
+   > an earlier version of this runbook hardened here and told you to close the root session, which
+   > made the document impossible to follow in order (found in review, 2026-09-10).
 
 ---
 
@@ -171,10 +205,19 @@ edit `/etc/postgresql/17/main/postgresql.conf` to `listen_addresses = 'localhost
 
 Create the role and database:
 ```
-openssl rand -base64 24   # save this value — it is the DB password, not shown again here
+openssl rand -hex 24   # save this value — it is the DB password, not shown again here
 sudo -u postgres psql -c "CREATE ROLE rosetta_chat WITH LOGIN PASSWORD '<paste the value above>';"
 sudo -u postgres psql -c "CREATE DATABASE rosetta_chat OWNER rosetta_chat;"
 ```
+
+> **`-hex`, not `-base64`, and this is not a style preference.** Base64's alphabet includes `/`,
+> which is a path delimiter inside a URL. This password goes into `DATABASE_URL` in step 7, and a
+> `/` there makes the URL unparseable — Node throws `ERR_INVALID_URL` before the app can report
+> anything useful about its own configuration. Measured on this project's own parser
+> (`pg-connection-string`) during review on 2026-09-10: **`/` appears in roughly 42% of
+> `openssl rand -base64 24` outputs**, so it is close to a coin flip, and it fails at first service
+> start — after every other step has succeeded. `+` and `=` are harmless; only `/` breaks it.
+> `-hex 24` is the same 24 bytes of entropy with a URL-safe alphabet.
 Expected: both `psql -c` commands print `CREATE ROLE` / `CREATE DATABASE`.
 
 Compose the connection string for step 7:
@@ -331,10 +374,17 @@ Copy `deploy/Caddyfile` from the repository to `/etc/caddy/Caddyfile` on the dro
 file is a template with placeholders only — arch-notes §4.1 — nothing to edit in it; the
 placeholders are filled by `caddy.env` above).
 
-**Validate before every reload, without exception:**
+**Validate before every reload, without exception** — and **with `--envfile`**, or every
+`{$PLACEHOLDER}` in the Caddyfile resolves to empty and you validate a configuration that is not
+the one Caddy will run:
 ```
-caddy validate --config /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --envfile /etc/caddy/caddy.env
 ```
+The `--envfile` flag was missing here until review on 2026-09-10. Without it, `{$SITE_DOMAIN}`,
+`{$GATE_USER}`, `{$GATE_HASH}` and `{$ACME_EMAIL}` are all empty at validation time — the check
+can pass while the real config is broken, or fail for reasons that have nothing to do with your
+edits. `caddy.env` is the same file `systemd` hands the service, so validating with it is
+validating what actually runs.
 Expected: `Valid configuration`. **[HOST] AC-CAD-4** — this is the proof; there is no Caddy binary
 on the darwin dev box, so this is the first time the file is checked at all.
 
@@ -388,15 +438,59 @@ systemd-analyze verify /etc/systemd/system/rosetta-chat-retention.timer
 ```
 Expected: no output (silence = clean) for each.
 
-Enable the retention timer now (it is harmless to enable before a release exists — it will not
-fire until its `OnCalendar=daily` schedule, by which point step 12 will have run):
+### 10.3 Arm the units for boot — enable, do not start
+
 ```
+systemctl enable chat
 systemctl enable rosetta-chat-retention.timer
 ```
+
+`enable` without `--now` is deliberate on both, and each for a different reason:
+
+- **`chat`** — without this, the service never comes back after a reboot. The deploy workflow
+  starts it, but `systemctl start` does not survive a restart; only `enable` does. This line was
+  missing entirely until review on 2026-09-10.
+- **`rosetta-chat-retention.timer`** — `--now` here would be actively wrong. The timer carries
+  `Persistent=true` (`deploy/systemd/rosetta-chat-retention.timer`), so activating it before a
+  release exists can trigger an immediate catch-up run against `/srv/chat/current`, which is not
+  yet a symlink. It would fail loudly and prove nothing.
+
+**The timer is therefore not running yet.** It is armed for boot but inactive, and
+`systemctl list-timers` will not show it. **Step 13j starts it**, after the first deploy has put a
+release in place. Do not skip that — an armed-but-never-started timer means the retention sweep
+does not run until the droplet happens to reboot, and the 30-day erasure promise quietly depends on
+that never being noticed.
 
 **Do not `systemctl start chat` or `chat-migrate` here.** There is no release at
 `/srv/chat/current` yet — starting either now fails in a way that looks alarming and proves
 nothing. The first legitimate start happens inside step 12's deploy script.
+
+### 10.4 SSH hardening — the last root-only action
+
+Deferred from step 2 on purpose: everything above needed unrestricted root, and `deploy` cannot
+provide it. This is the point where root SSH is no longer required.
+
+Edit `/etc/ssh/sshd_config`, or a drop-in under `/etc/ssh/sshd_config.d/`:
+```
+PermitRootLogin no
+PasswordAuthentication no
+```
+```
+systemctl restart sshd
+```
+
+**Do not close your root session yet.** In a second terminal, confirm both of these:
+```
+ssh deploy@<droplet-ip>          # expected: a deploy shell, no password prompt
+ssh root@<droplet-ip>            # expected: Permission denied (publickey)
+```
+Only when the first succeeds *and* the second is refused, close the root session.
+
+**[HOST] AC-SEC-5** — proof: that pair of results together.
+
+> If you are locked out at this point, the DigitalOcean web console still provides root access
+> independently of SSH. That is the recovery path, and it is the reason this step is safe to
+> perform last rather than never.
 
 ---
 
@@ -593,8 +687,16 @@ despite the service being up and reachable through Caddy.
 
 **j. Retention timer is scheduled and monitorable.**
 ```
+sudo systemctl start rosetta-chat-retention.timer
 systemctl list-timers rosetta-chat-retention.timer
 ```
+**The `start` is required, not optional.** Step 10.3 armed the timer for boot (`enable`) but
+deliberately did not activate it, because `Persistent=true` would have fired a catch-up run before
+any release existed. This is the point where a release exists, so this is where the timer actually
+begins running. Skip it and the retention sweep does not run until the droplet next reboots —
+silently, with the 30-day erasure promise depending on nobody noticing. Corrected in review,
+2026-09-10.
+
 Expected: a row showing a `NEXT` run within the next 24 hours and a `LAST` column (empty until
 first fire). To prove the unit itself succeeds without waiting a day, trigger it once by hand:
 ```
@@ -711,7 +813,7 @@ them.
 | AC-SEC-2 | 7 | `sudo -u deploy cat secrets.env` → denied |
 | AC-SEC-3 | 2 | `sudo -l -U deploy` → exactly 4 commands |
 | AC-SEC-4 | 2 | `rosetta-chat` nologin, no home, not in sudoers |
-| AC-SEC-5 | 2 | root SSH refuses; `deploy` key-only login works |
+| AC-SEC-5 | **10.4** | root SSH refuses; `deploy` key-only login works (moved from step 2 — hardening cannot precede the root-only steps 3–10) |
 | AC-ROL-2 | 14 | induced migration failure → auto flip-back + restart |
 | AC-ROL-3 | 14 | same run still exits non-zero in Actions |
 | AC-ROL-5 | 14 | `ls releases | wc -l` ≥ 3 |

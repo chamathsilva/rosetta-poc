@@ -21,6 +21,8 @@
 // user decision 2026-09-08: guard it so it no-ops cleanly today; do not
 // land the moderation migration just to satisfy this task. Wiring
 // statement 2 in for real is a docs/TODO.md follow-up once `bans` exists.
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { GUEST_TTL_MS } from '../server/session.js';
 
@@ -191,7 +193,26 @@ async function main(): Promise<void> {
 
 // Only run the CLI when this module is the process entry point, not when
 // `runRetention`/`GUEST_REAP_MS` are imported by the test suite.
-if (import.meta.url === `file://${process.argv[1]}`) {
+//
+// Compared by REAL path on both sides. Production runs this file through a
+// symlink (/srv/chat/current -> the release directory). Node resolves
+// import.meta.url to the real path, but process.argv[1] keeps the symlink
+// path, so the previous `import.meta.url === \`file://${process.argv[1]}\``
+// never matched there: main() silently never ran, the process exited 0, and
+// systemd recorded success while nothing was erased (GDP-F004, found on the
+// real host 2026-09-15). fileURLToPath also avoids hand-building a URL,
+// which broke on paths containing spaces or percent-encoded characters.
+function isEntryPoint(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((err: unknown) => {
     console.error(err);
     process.exitCode = 1;

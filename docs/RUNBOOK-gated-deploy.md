@@ -64,12 +64,14 @@ everything else has succeeded (arch-notes §3.4).
 
 On **your own machine**, never on the droplet:
 ```
-ssh-keygen -t ed25519 -C "rosetta-chat-deploy" -f ./deploy_key -N ""
+ssh-keygen -t ed25519 -C "rosetta-chat-deploy" -f ~/.ssh/rosetta-chat-deploy_key -N ""
 ```
-Produces `./deploy_key` (private — becomes the `DEPLOY_SSH_KEY` GitHub secret in step 11) and
-`./deploy_key.pub` (public — pasted into the droplet in step 2.2).
+Produces `~/.ssh/rosetta-chat-deploy_key` (private — becomes the `DEPLOY_SSH_KEY` GitHub secret in step 11) and
+`~/.ssh/rosetta-chat-deploy_key.pub` (public — pasted into the droplet in step 2.2).
 
-Keep `./deploy_key` until step 11 is done, then delete your local copy. It is a credential with
+**Generate it in `~/.ssh/`, never in the repository folder.** An earlier version of this step wrote `./deploy_key` into the current directory. Run from the repo root, that puts a private key at an untracked path `.gitignore` does not cover — one `git add -A` away from being committed to a public repository. Found while executing this step on the real droplet (GDP-F002, 2026-09-15).
+
+Keep `~/.ssh/rosetta-chat-deploy_key` until step 11 is done, then delete your local copy. It is a credential with
 deploy rights to production.
 
 ---
@@ -108,7 +110,7 @@ can touch secrets or restart itself.
    ```
    adduser --disabled-password --gecos "" deploy
    mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
-   # paste the contents of ./deploy_key.pub from step 0.3 into:
+   # paste the contents of ~/.ssh/rosetta-chat-deploy_key.pub from step 0.3 into:
    nano /home/deploy/.ssh/authorized_keys
    chmod 600 /home/deploy/.ssh/authorized_keys
    chown -R deploy:deploy /home/deploy/.ssh
@@ -131,11 +133,11 @@ can touch secrets or restart itself.
 4. **Confirm `deploy` can log in — but do not disable root SSH yet.**
 
    Open a **second terminal** and confirm, using the key generated in step 0.3 explicitly --
-   plain `ssh deploy@<droplet-ip>` will very likely fail here, because `./deploy_key` is not one of
+   plain `ssh deploy@<droplet-ip>` will very likely fail here, because `~/.ssh/rosetta-chat-deploy_key` is not one of
    the filenames (`id_rsa`, `id_ed25519`, ...) the SSH client searches for automatically, and
    nothing has added it to an agent:
    ```
-   ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>
+   ssh -i ~/.ssh/rosetta-chat-deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>
    ```
    Expected: you land in a `deploy` shell with no password prompt.
 
@@ -503,7 +505,7 @@ systemctl restart sshd
 
 **Do not close your root session yet.** In a second terminal, confirm both of these:
 ```
-ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>   # expected: a deploy shell, no password prompt
+ssh -i ~/.ssh/rosetta-chat-deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip>   # expected: a deploy shell, no password prompt
 ssh root@<droplet-ip>                                            # expected: Permission denied (publickey)
 ```
 Only when the first succeeds *and* the second is refused, close the root session.
@@ -523,10 +525,10 @@ Only when the first succeeds *and* the second is refused, close the root session
 
 Design: arch-notes §6.1, §7, §10 step 11.
 
-1. **Do not generate a new keypair here.** `./deploy_key` and `./deploy_key.pub` already exist
+1. **Do not generate a new keypair here.** `~/.ssh/rosetta-chat-deploy_key` and `~/.ssh/rosetta-chat-deploy_key.pub` already exist
    from step 0.3, and the public half is already installed on the droplet (step 2.2). Running
-   `ssh-keygen -f ./deploy_key` a second time is destructive, not idempotent: if you accept the
-   overwrite prompt, `./deploy_key` becomes a *different* private key than the one whose public
+   `ssh-keygen -f ~/.ssh/rosetta-chat-deploy_key` a second time is destructive, not idempotent: if you accept the
+   overwrite prompt, `~/.ssh/rosetta-chat-deploy_key` becomes a *different* private key than the one whose public
    half is in `authorized_keys`, and the two now silently mismatch -- the deploy workflow's very
    first SSH connection would fail with "Permission denied" and nothing before that point would
    have told you why. If you decline the overwrite, nothing happens, which only works because you
@@ -535,9 +537,9 @@ Design: arch-notes §6.1, §7, §10 step 11.
 
    Confirm the public key is installed (it should already be, from step 2.2):
    ```
-   ssh -i ./deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip> "cat ~/.ssh/authorized_keys"
+   ssh -i ~/.ssh/rosetta-chat-deploy_key -o IdentitiesOnly=yes deploy@<droplet-ip> "cat ~/.ssh/authorized_keys"
    ```
-   Expected: the output matches the contents of `./deploy_key.pub` on your machine.
+   Expected: the output matches the contents of `~/.ssh/rosetta-chat-deploy_key.pub` on your machine.
 2. In the GitHub repository settings:
    - Secret `DEPLOY_SSH_KEY` = the **private** key contents.
    - Variable `SITE_DOMAIN` = the value from step 0/8.
@@ -551,7 +553,7 @@ Design: arch-notes §6.1, §7, §10 step 11.
    ```
    Expected output form: `<DEPLOY_HOST> ssh-ed25519 AAAA...`. Paste this exact line as the
    `SSH_KNOWN_HOSTS` variable value.
-4. Delete `./deploy_key` and `./deploy_key.pub` from your machine once the secret is saved — they
+4. Delete `~/.ssh/rosetta-chat-deploy_key` and `~/.ssh/rosetta-chat-deploy_key.pub` from your machine once the secret is saved — they
    have no further use locally.
 
 **[HOST] proof this step succeeded**: no direct check yet — step 12's SSH connection from the

@@ -28,15 +28,6 @@
 {$SITE_DOMAIN} {
     encode zstd gzip
 
-    # === GATE — delete this block at public launch. Nothing else changes. ===
-    # Removable by config change alone (docs/ARCHITECTURE.md "Pre-moderation
-    # gate", docs/CONTEXT.md "Staged launch"): delete this block, run
-    # `caddy validate`, then `systemctl reload caddy`. No application
-    # change, no redeploy, no restart of the Node process (arch-notes §4.5).
-    basic_auth {
-        {$GATE_USER} "{$GATE_HASH}"
-    }
-    # === END GATE ===
 
     # --- Pre-authorised fallback (arch-notes §4.4) — DO NOT ENABLE BY DEFAULT ---
     # A browser cannot set headers on a WebSocket handshake, and Chrome

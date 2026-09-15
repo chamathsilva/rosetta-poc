@@ -38,7 +38,7 @@ The vendor-generated workflows were kept over guarded alternatives **[USER-DECID
 
 ### P1 — before gated deploy — implement the launch gate — `docs/ARCHITECTURE.md`
 
-**Closed by code, 2026-09-08.** `deploy/Caddyfile` enforces `basic_auth` above the application in a contiguous, deletable block, per the Phase 8 resolution (Caddy basic auth, no application code). Applying the config to a live Caddy instance is a runbook step (**[HOST]**, not yet run).
+**Closed by code, 2026-09-08.** `deploy/Caddyfile` enforces `basic_auth` above the application in a contiguous, deletable block, per the Phase 8 resolution (Caddy basic auth, no application code). **Removed 2026-09-15 by owner decision** — the site is public; the gated config is backed up on the droplet. Applying the config to a live Caddy instance is a runbook step (**[HOST]**, not yet run).
 
 ### P1 — before gated deploy — set up a free subdomain (DuckDNS-style) — `docs/ARCHITECTURE.md`
 
@@ -49,6 +49,8 @@ Resolved (Phase 8): free subdomain sufficient for the gated phase. `docs/RUNBOOK
 **Blocking item.** Required before anonymous public access opens: the published abuse contact address must be genuine and stable, which a free subdomain does not satisfy.
 
 ## Blocking anonymous public access
+
+> **Overdue since 2026-09-15.** The basic-auth gate was removed by owner decision and the site is publicly reachable. Every "before public launch" item in this file is now an obligation the running site does not meet, not a precondition (`docs/CONTEXT.md` "Staged launch").
 
 ### P1 — when the moderation migration lands — wire the `bans.ip` retention statement in for real — `src/db/retention.ts`
 

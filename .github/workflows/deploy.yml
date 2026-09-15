@@ -409,18 +409,21 @@ jobs:
       # 6. External assertion (step 8 of arch-notes §8.1). Deliberately
       #    OUTSIDE the remote script and run with no rollback path: per
       #    arch-notes §8.2 row 8, a wrong result here means the app is
-      #    healthy on loopback and Caddy/DNS/the gate is not - rolling
+      #    healthy on loopback and Caddy/DNS is not - rolling
       #    back the application would not fix that and would discard a
       #    good release. The workflow still fails red.
       # ---------------------------------------------------------------
-      - name: External assertion — unauthenticated request must return 401
+      - name: External assertion — public site must return 200
         run: |
           set -euo pipefail
           CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://${SITE_DOMAIN}/")"
           echo "https://${SITE_DOMAIN}/ -> HTTP $CODE"
-          if [ "$CODE" != "401" ]; then
-            echo "::error::Expected 401 (the Caddy basic-auth gate) but got '$CODE'." >&2
+          # The basic-auth gate was removed on 2026-09-15 by owner decision
+          # (docs/CONTEXT.md "Staged launch"); an unauthenticated request now
+          # reaches the application and must succeed.
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Expected 200 from the public site but got '$CODE'." >&2
             echo "Per architecture-notes.md §8.2 row 8 this is NOT an application rollback case: the service is healthy on loopback and was left running. Investigate DNS/TLS/Caddy per §4.6 - do not roll back the release for this." >&2
             exit 1
           fi
-          echo "Gate check passed."
+          echo "Public site check passed."

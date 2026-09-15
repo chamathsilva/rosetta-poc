@@ -1,5 +1,7 @@
 # RUNBOOK — gated deploy
 
+> **Gate removed 2026-09-15 (owner decision).** After provisioning, the Caddy basic-auth gate was deleted and the site opened to the public (`docs/CONTEXT.md` "Staged launch"). Expectations in this runbook that depend on the gate — the unauthenticated `401` and authenticated `502` in step 9, 13c's `401`, 13d's credentials, 13e's basic-auth-over-WebSocket test — describe the gated state as provisioned, not the site as it now runs. The deploy workflow's final assertion now expects `200`.
+
 You are about to spend real money and put a real internet-facing service behind one basic-auth
 gate, with **no backups in existence** (`plans/gated-deploy/architecture-notes.md` §11 — this
 design can restore code and cannot restore data). Read this whole file once before you start.

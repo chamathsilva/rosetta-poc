@@ -14,6 +14,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { Pool } from 'pg';
 import { runRetention, GUEST_REAP_MS } from './retention.js';
@@ -377,11 +379,14 @@ test(
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const retentionScript = path.join(repoRoot, 'src', 'db', 'retention.ts');
 
-function runCli(env: Record<string, string | undefined>): Promise<{ code: number; stdout: string; stderr: string }> {
+function runCli(
+  env: Record<string, string | undefined>,
+  script: string = retentionScript,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      ['--import', 'tsx', retentionScript],
+      ['--import', 'tsx', script],
       { cwd: repoRoot, env: { ...process.env, ...env } },
       (err, stdout, stderr) => {
         // execFile's callback reports failure via `err`, whose numeric
@@ -402,6 +407,37 @@ test('AC-RET-9a: the CLI exits non-zero and logs an error when DATABASE_URL is m
   const { code, stderr } = await runCli({ DATABASE_URL: '' });
   assert.notEqual(code, 0);
   assert.match(stderr, /DATABASE_URL is not set/);
+});
+
+// --- GDP-F004 regression: invoked through a symlink, as production does ---
+//
+// deploy/systemd/rosetta-chat-retention.service runs
+// /srv/chat/current/dist/db/retention.js, where `current` is a symlink to
+// the release directory. Node resolves the entry module to its real path
+// for import.meta.url, but process.argv[1] keeps the symlink path, so a
+// plain string comparison of the two never matched: main() silently never
+// ran, the process exited 0, and systemd recorded success while nothing
+// was erased. Found on the real host on 2026-09-15; every earlier test
+// launched the script by its real path and so could not see it.
+//
+// Needs no database, on purpose, so it is never skipped: with DATABASE_URL
+// empty, a CLI whose main() ran exits non-zero with a clear error, while a
+// CLI that skipped main() exits 0 having done nothing.
+test('GDP-F004: the CLI still runs when invoked through a symlinked directory, as the systemd unit does', async () => {
+  const linkDir = await mkdtemp(path.join(os.tmpdir(), 'retention-symlink-'));
+  const current = path.join(linkDir, 'current');
+  await symlink(repoRoot, current, 'dir');
+  try {
+    const { code, stderr } = await runCli({ DATABASE_URL: '' }, path.join(current, 'src', 'db', 'retention.ts'));
+    assert.notEqual(
+      code,
+      0,
+      'CLI exited 0 when invoked through a symlink: main() never ran, so the retention sweep would silently erase nothing',
+    );
+    assert.match(stderr, /DATABASE_URL is not set/);
+  } finally {
+    await rm(linkDir, { recursive: true, force: true });
+  }
 });
 
 test(

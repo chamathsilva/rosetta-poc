@@ -39,9 +39,9 @@ Provenance is marked per section: **[USER-DECIDED]** = stated by the user or `PO
 
 - The product **will be publicly launched to real strangers**, not left as a demo.
 - Launch is staged, and the distinction is load-bearing:
-  - **Gated launch** — deployed, reachable, real infrastructure, but closed to strangers behind **Caddy basic auth**, enforced in the reverse proxy, above the application (no application code). **[USER-DECIDED]** Removing it at public launch is a config change. This is the state for the walking skeleton and every phase before moderation ships.
-  - **Public launch** — anonymous open access. Opens **only after** rate limiting and the minimum moderation set are live.
-- Do not treat "it is deployed" as permission to open anonymous access.
+  - **Gated launch** — deployed, reachable, real infrastructure, closed to strangers behind **Caddy basic auth** enforced in the reverse proxy (no application code). This was the state from the walking skeleton through provisioning. **Ended 2026-09-15.**
+  - **Public launch — open since 2026-09-15, by owner decision, before rate limiting and the moderation floor exist. [USER-DECIDED — 2026-09-15]** The owner was told what the gate was protecting against — no report button, no admin remove/ban, no rate limiting, no backups, no monitoring, no owner-controlled domain or published abuse contact — and chose to open anonymous access anyway. This reverses the earlier decision that public access opens only after rate limiting and the moderation floor are live.
+- **Rate limiting and the moderation floor are now overdue, not preconditions.** They remain required; the site is operating without them. Restoring the gate is a Caddy config change (a backup of the gated config is kept on the droplet at `/etc/caddy/Caddyfile.gated-20260915T073739Z`).
 
 ## Moderation floor — non-deferrable before anonymous public access
 

@@ -209,14 +209,14 @@ The path, if it is ever wanted: store `hmac(ip, server_secret)` alongside the ad
 **[USER-DECIDED — supersedes `POC-BRIEF.md` on droplet size and database]**
 
 ```
-internet → Caddy (:443, auto TLS, basic auth gate) → Node process (:3000, HTTP + WS)
+internet → Caddy (:443, auto TLS; basic-auth gate removed 2026-09-15) → Node process (:3000, HTTP + WS)
                                                           └→ PostgreSQL (localhost:5432, same droplet)
 ```
 
 - Droplet: **$6/mo, 1 GB RAM, 1 vCPU, 25 GB SSD, 1 TB transfer**, plus **2 GB swap**. Not $4/512 MB — 512 MB is not viable once Postgres is co-hosted.
 - Upgrade path if memory pressure appears: **$12/mo, 2 GB RAM**. Decided in advance so it is not re-argued under load.
 - systemd units for Node and Postgres; Caddy under its own service. The Node unit runs **compiled JavaScript from `dist/`**, never TypeScript sources — the build is a deploy-time step, not a runtime one. **[USER-DECIDED — 2026-09-04]**
-- **Pre-moderation gate: Caddy basic auth**, enforced in the reverse proxy, above the application — no application code implements it. Removing it at public launch is a Caddy config change, not a code change. **[USER-DECIDED]**
+- **Pre-moderation gate: removed 2026-09-15 by owner decision [USER-DECIDED — 2026-09-15].** It was Caddy basic auth above the application, with no application code. The site is public **before** the moderation floor and rate limiting exist (`docs/CONTEXT.md`). Restoring it is a Caddy config change; the gated config is backed up on the droplet at `/etc/caddy/Caddyfile.gated-20260915T073739Z`.
 - Secrets via systemd `EnvironmentFile`, read as `process.env`, fail-fast on missing required vars. See `docs/PATTERNS/env-config-secrets.md`.
 - Not provisioned yet. Do not provision before the walking skeleton is ready to deploy.
 
@@ -261,6 +261,7 @@ Daily granularity on a 30-day rule means worst-case retention is **≤31 days**,
 
 - **Gated phase**: a free subdomain (DuckDNS-style) is sufficient — Caddy's automatic TLS just needs something to resolve to the droplet.
 - **Before public launch**: a real registered domain is required, because the published abuse contact address (moderation floor) must be genuine and stable — a free subdomain does not satisfy that.
+- **Public launch happened on the DuckDNS subdomain on 2026-09-15** (owner decision), so the registered-domain requirement is now **overdue**.
 - This is a blocking item before anonymous public access opens; see `docs/TODO.md`.
 
 ## Backups — an owned deliverable
